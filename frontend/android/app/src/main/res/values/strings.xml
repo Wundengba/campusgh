@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Campus Ghana</string>
+    <string name="title_activity_main">Campus Ghana</string>
+    <string name="package_name">com.campusghana.app</string>
+    <string name="custom_url_scheme">com.campusghana.app</string>
+</resources>

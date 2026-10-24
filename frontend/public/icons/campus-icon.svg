@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Campus Ghana">
+  <defs>
+    <linearGradient id="campusGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f766e" />
+      <stop offset="55%" stop-color="#1d4ed8" />
+      <stop offset="100%" stop-color="#7c3aed" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="128" fill="#0f172a" />
+  <rect x="44" y="44" width="424" height="424" rx="112" fill="url(#campusGradient)" />
+  <path d="M256 120 128 186v24l128 66 128-66v-24L256 120Zm-74 112v64c0 30 38 58 74 58s74-28 74-58v-64l-74 39-74-39Zm160 12v53c0 9 7 16 16 16s16-7 16-16v-53c0-9-7-16-16-16s-16 7-16 16Z" fill="#fff" />
+  <circle cx="394" cy="394" r="42" fill="#fff" fill-opacity="0.16" />
+  <path d="M382 394h24M394 382v24" stroke="#fff" stroke-width="12" stroke-linecap="round" />
+</svg>

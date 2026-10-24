@@ -1,0 +1,258 @@
+/* School 1 - Custom Styles */
+/* This file contains custom CSS styles specific to School 1 */
+
+/* School-specific color variables */
+:root {
+  --school1-primary: #1e40af;
+  --school1-secondary: #3b82f6;
+  --school1-accent: #f59e0b;
+  --school1-success: #10b981;
+  --school1-warning: #f59e0b;
+  --school1-error: #ef4444;
+  --school1-background: #f8fafc;
+  --school1-surface: #ffffff;
+}
+
+/* School 1 Dashboard Styles */
+.school1-dashboard {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.school1-dashboard .welcome-header {
+  background: linear-gradient(135deg, var(--school1-primary) 0%, var(--school1-secondary) 100%);
+  border-radius: 16px;
+  box-shadow: 0 10px 25px rgba(30, 64, 175, 0.2);
+}
+
+.school1-dashboard .welcome-header h1 {
+  font-size: 2.5rem;
+  font-weight: 700;
+  margin: 0 0 0.5rem 0;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.school1-dashboard .welcome-header p {
+  font-size: 1.1rem;
+  opacity: 0.9;
+  margin: 0;
+}
+
+/* Stats Cards */
+.school1-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1.5rem;
+  margin: 2rem 0;
+}
+
+.school1-stat-card {
+  background: var(--school1-surface);
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  border: 1px solid #e2e8f0;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.school1-stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+}
+
+.school1-stat-card .stat-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.school1-stat-card .stat-icon.students {
+  background: linear-gradient(135deg, #10b981, #34d399);
+}
+
+.school1-stat-card .stat-icon.classes {
+  background: linear-gradient(135deg, #f59e0b, #fbbf24);
+}
+
+.school1-stat-card .stat-icon.attendance {
+  background: linear-gradient(135deg, #8b5cf6, #a78bfa);
+}
+
+.school1-stat-card .stat-value {
+  font-size: 2.5rem;
+  font-weight: 700;
+  color: var(--school1-primary);
+  margin-bottom: 0.5rem;
+}
+
+.school1-stat-card .stat-label {
+  font-size: 0.9rem;
+  color: #64748b;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Activity Feed */
+.school1-activity-feed {
+  background: var(--school1-surface);
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  border: 1px solid #e2e8f0;
+}
+
+.school1-activity-feed h3 {
+  margin: 0 0 1.5rem 0;
+  color: var(--school1-primary);
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.school1-activity-item {
+  display: flex;
+  align-items: flex-start;
+  padding: 1rem 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.school1-activity-item:last-child {
+  border-bottom: none;
+}
+
+.school1-activity-item .activity-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  margin-right: 1rem;
+  flex-shrink: 0;
+}
+
+.school1-activity-item .activity-icon.academic {
+  background: linear-gradient(135deg, #10b981, #34d399);
+}
+
+.school1-activity-item .activity-icon.sports {
+  background: linear-gradient(135deg, #f59e0b, #fbbf24);
+}
+
+.school1-activity-item .activity-icon.announcement {
+  background: linear-gradient(135deg, #8b5cf6, #a78bfa);
+}
+
+.school1-activity-content {
+  flex: 1;
+}
+
+.school1-activity-title {
+  font-weight: 600;
+  color: #1e293b;
+  margin-bottom: 0.25rem;
+}
+
+.school1-activity-description {
+  color: #64748b;
+  font-size: 0.9rem;
+  margin-bottom: 0.5rem;
+}
+
+.school1-activity-time {
+  color: #94a3b8;
+  font-size: 0.8rem;
+}
+
+/* Quick Actions */
+.school1-quick-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+.school1-action-button {
+  background: var(--school1-surface);
+  border: 2px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1.5rem;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+
+.school1-action-button:hover {
+  border-color: var(--school1-primary);
+  box-shadow: 0 4px 12px rgba(30, 64, 175, 0.15);
+  transform: translateY(-1px);
+}
+
+.school1-action-icon {
+  font-size: 2rem;
+  margin-bottom: 0.75rem;
+  display: block;
+}
+
+.school1-action-title {
+  font-weight: 600;
+  color: var(--school1-primary);
+  margin-bottom: 0.25rem;
+}
+
+.school1-action-description {
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .school1-dashboard .welcome-header {
+    padding: 1.5rem;
+  }
+
+  .school1-dashboard .welcome-header h1 {
+    font-size: 2rem;
+  }
+
+  .school1-stats-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .school1-quick-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --school1-background: #0f172a;
+    --school1-surface: #1e293b;
+  }
+
+  .school1-stat-card,
+  .school1-activity-feed,
+  .school1-action-button {
+    background: var(--school1-surface);
+    border-color: #334155;
+  }
+
+  .school1-activity-title {
+    color: #f1f5f9;
+  }
+
+  .school1-activity-description,
+  .school1-activity-time {
+    color: #94a3b8;
+  }
+}

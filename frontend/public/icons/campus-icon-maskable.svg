@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Campus Ghana maskable icon">
+  <defs>
+    <linearGradient id="maskableGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f766e" />
+      <stop offset="52%" stop-color="#1d4ed8" />
+      <stop offset="100%" stop-color="#7c3aed" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="#0f172a" />
+  <circle cx="256" cy="256" r="208" fill="url(#maskableGradient)" />
+  <path d="M256 138 132 202v24l124 63 124-63v-24L256 138Zm-70 108v57c0 27 35 52 70 52s70-25 70-52v-57l-70 35-70-35Zm152 10v48c0 8 6 14 14 14s14-6 14-14v-48c0-8-6-14-14-14s-14 6-14 14Z" fill="#fff" />
+</svg>

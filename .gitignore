@@ -1,0 +1,14 @@
+# Ignore Windows reserved file
+frontend/nul
+node_modules/
+.vite/
+
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.env
+
+backend/.env
+
+.DS_Store
+Thumbs.db

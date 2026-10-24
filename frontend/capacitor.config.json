@@ -1,0 +1,9 @@
+{
+  "appId": "com.campusghana.app",
+  "appName": "Campus Ghana",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https"
+  }
+}

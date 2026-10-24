@@ -1,0 +1,11 @@
+export const SUBJECTS = ["English Language","Mathematics","Integrated Science","Social Studies","Religious & Moral Ed","Home Language","French","Creative Arts","Career Technology","Computing"];
+export const GHANA_REGIONS = ["Greater Accra","Ashanti","Western","Central","Eastern","Volta","Northern","Upper East","Upper West","Bono","Oti","Ahafo","Bono East","North East","Savannah","Western North"];
+export const SCHOOLS_DATA = [];
+export const STUDENTS_DATA = [];
+export const SCORES_DATA = [];
+export const ATTENDANCE_DATA = [];
+export const ANNOUNCEMENTS = [];
+export const FEES_DATA = [];
+export const FINANCE_DATA = { income: 0, expenses: 0, fees_collected: 0, outstanding: 0 };
+export const TEACHERS_DATA = [];
+export const EVENTS_DATA = [];

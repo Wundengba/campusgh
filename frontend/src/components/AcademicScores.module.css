@@ -1,0 +1,6 @@
+/* Professional restyle for AcademicScores input hover */
+.score-input:hover, .score-input:focus {
+  border-color: #2563eb !important;
+  box-shadow: 0 2px 8px #2563eb22 !important;
+  background: #e0e7ef !important;
+}

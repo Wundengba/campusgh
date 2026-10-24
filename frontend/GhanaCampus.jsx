@@ -2836,7 +2836,7 @@ const css = `
   background: rgba(59, 130, 246, 0.1);
 }
 
-.sidebar-overlay {
+.portal-container > .sidebar-overlay {
   position: fixed;
   top: 0;
   left: 0;
@@ -20368,9 +20368,17 @@ const dedupeSubpageKeys = (keys) => {
 const getPriorityBottomKeys = (priorityKeys, navItems, blockedKeys = new Set(), limit = 5) => {
   const selected = [];
   const seen = new Set();
+  const availableKeys = new Set(navItems.map((item) => item.key).filter(Boolean));
 
   const addKey = (key) => {
-    if (!key || seen.has(key) || blockedKeys.has(key)) return;
+    if (
+      !key ||
+      seen.has(key) ||
+      blockedKeys.has(key) ||
+      !availableKeys.has(key)
+    ) {
+      return;
+    }
     selected.push(key);
     seen.add(key);
   };
@@ -24977,6 +24985,7 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
     studentAttendanceEnabled,
     studentCalendarSyncEnabled,
     studentChatEnabled,
+    studentDashboardEnabled,
     studentDocsEnabled,
     studentExamScheduleEnabled,
     studentFeesPortalEnabled,
@@ -25749,7 +25758,14 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
 
 // ROOT
 function GhanaCampus() {
-  const [session, setSession] = useState(() => readAppSession());
+  const [session, setSession] = useState(() => {
+    const storedSession = readAppSession();
+    if (storedSession?.authSource === "demo") {
+      writeAppSession(null);
+      return null;
+    }
+    return storedSession;
+  });
   const [darkMode, setDarkMode] = useState(false);
   const [appSettings, setAppSettings] = useState(DEFAULT_SETTINGS);
 
@@ -25823,6 +25839,13 @@ function GhanaCampus() {
   }, []);
 
   const login = async (portal, user, password) => {
+    if (!supabase && portal === "admin") {
+      return {
+        ok: false,
+        error: "Admin sign-in requires Supabase configuration.",
+      };
+    }
+
     if (supabase) {
       const rawIdentifier = String(user.email || "").trim();
       const digitsOnly = portal === "student"
@@ -26145,7 +26168,6 @@ function GhanaCampus() {
       {!session ? (
         <Landing
           onSelect={(portal, user, password) => login(portal, user, password)}
-          hasSupabase={!!supabase}
         />
       ) : session.portal === "admin" ? (
         <AdminPortal

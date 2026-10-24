@@ -2,7 +2,13 @@
 
 This folder now contains the Supabase schema setup needed by the frontend.
 
-Run the SQL in [supabase/migrations/001_public_portal_tables.sql](supabase/migrations/001_public_portal_tables.sql) inside the Supabase SQL Editor for your project.
+## Apply the remaining migrations in one run
+
+The core tables and migration `001_public_portal_tables.sql` are already applied to the current Supabase project. To apply the remaining migrations, open the Supabase SQL Editor, paste the contents of [supabase/migrations/002_to_021_remaining_migrations.sql](supabase/migrations/002_to_021_remaining_migrations.sql), and run it once. It combines the available migrations from `002` through `021` in order; migration `010` is not present in this repository.
+
+If you already ran that combined script, apply [supabase/migrations/022_fix_study_group_and_parent_message_rls.sql](supabase/migrations/022_fix_study_group_and_parent_message_rls.sql) separately to fix recursive study-group policies and parent-teacher message permissions. Do not rerun the combined script just to apply this fix.
+
+For a fresh Supabase project, first run [supabase/migrations/create_users_students_scores_with_rls.sql](supabase/migrations/create_users_students_scores_with_rls.sql) and [supabase/migrations/001_public_portal_tables.sql](supabase/migrations/001_public_portal_tables.sql), then run the combined remaining-migrations script.
 
 For the separate registered-school registry and school-admin login flow, also run [supabase/migrations/003_registered_schools_and_school_admins.sql](supabase/migrations/003_registered_schools_and_school_admins.sql).
 

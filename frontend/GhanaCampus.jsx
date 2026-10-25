@@ -1,17 +1,17 @@
-﻿import { useState, useEffect, useCallback, useContext, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useContext, useMemo, useRef } from "react";
 import { supabase } from "./src/lib/supabaseClient.js";
 import { Ico } from "./src/components/Ico.jsx";
 import { Landing } from "./src/components/Landing.jsx";
 import { Topbar } from "./src/components/Topbar.jsx";
 import { SettingsContext } from "./src/context/SettingsContext.js";
 import { useIsMobileLayout } from "./src/hooks/useIsMobileLayout.js";
+import { useStudentPortalRecords } from "./src/hooks/useStudentPortalRecords.js";
 import AcademicScores from "./src/components/AcademicScores.jsx";
 import { DEFAULT_SETTINGS, getGrade } from "./src/config/campusConfig.js";
 import {
   ANNOUNCEMENTS,
   ATTENDANCE_DATA,
   EVENTS_DATA,
-  FEES_DATA,
   FINANCE_DATA,
   GHANA_REGIONS,
   SCHOOLS_DATA,
@@ -6163,11 +6163,99 @@ function AttendancePage({
 }
 
 // â”€â”€â”€ FEES (Admin) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-function FeesAdmin({ studentsData, feesData, tableInfo }) {
+function FeesAdmin({
+  studentsData,
+  feesData,
+  tableInfo,
+  registeredSchoolId = null,
+}) {
   const hasFeesError = hasRealTableError(tableInfo);
-  const isMobile = useIsMobileLayout();
-  const students = studentsData?.length ? studentsData : [];
-  const fees = feesData?.length ? feesData : [];
+  const students = studentsData || [];
+  const [fees, setFees] = useState(feesData || []);
+  const [editingId, setEditingId] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [form, setForm] = useState({
+    student_id: "",
+    term: "First Term",
+    amount: "",
+    paid: "0",
+    due_date: "",
+  });
+  useEffect(() => {
+    setFees(feesData || []);
+  }, [feesData]);
+  const saveFee = async () => {
+    const student = students.find(
+      (row) => String(row.id) === String(form.student_id),
+    );
+    const amount = Number(form.amount);
+    const paid = Number(form.paid);
+    if (!student || !form.term.trim()) {
+      setError("Select a student and enter a term.");
+      return;
+    }
+    if (
+      !Number.isFinite(amount) ||
+      !Number.isFinite(paid) ||
+      amount < 0 ||
+      paid < 0 ||
+      paid > amount
+    ) {
+      setError("Enter valid fee amounts. Paid must be between zero and the total amount.");
+      return;
+    }
+    if (!supabase) {
+      setError("Supabase is not configured; this fee record cannot be saved.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    const payload = {
+      student_id: student.id,
+      index_number: student.index_number || student.index || null,
+      term: form.term.trim(),
+      amount,
+      paid,
+      status: paid >= amount ? "paid" : paid > 0 ? "partial" : "unpaid",
+      due_date: form.due_date || null,
+      ...(registeredSchoolId != null
+        ? { registered_school_id: registeredSchoolId }
+        : {}),
+    };
+    const request = editingId
+      ? supabase.from("fees").update(payload).eq("id", editingId)
+      : supabase.from("fees").insert(payload);
+    const { data, error: saveError } = await request.select("*").single();
+    if (saveError) {
+      setError(`Fee record was not saved: ${saveError.message}`);
+    } else {
+      const normalized = normalizeFeeRow(data);
+      setFees((current) => [
+        normalized,
+        ...current.filter((row) => String(row.id) !== String(normalized.id)),
+      ]);
+      setEditingId(null);
+      setForm({
+        student_id: "",
+        term: "First Term",
+        amount: "",
+        paid: "0",
+        due_date: "",
+      });
+    }
+    setSaving(false);
+  };
+  const editFee = (fee) => {
+    setEditingId(fee.id);
+    setForm({
+      student_id: String(fee.student_id || ""),
+      term: fee.term || "First Term",
+      amount: String(fee.amount ?? 0),
+      paid: String(fee.paid ?? 0),
+      due_date: fee.due_date || "",
+    });
+  };
   const totalCollected = fees.reduce(
     (sum, fee) => sum + Number(fee.paid || 0),
     0,
@@ -6177,9 +6265,9 @@ function FeesAdmin({ studentsData, feesData, tableInfo }) {
       sum + Math.max(Number(fee.amount || 0) - Number(fee.paid || 0), 0),
     0,
   );
-  const studentsPaid = fees.filter(
-    (fee) => String(fee.status) === "paid",
-  ).length;
+  const studentsPaid = new Set(
+    fees.filter((fee) => String(fee.status) === "paid").map((fee) => fee.student_id),
+  ).size;
   return (
     <div className="fade-in">
       <div className="page-header">
@@ -6191,6 +6279,82 @@ function FeesAdmin({ studentsData, feesData, tableInfo }) {
           only live rows currently available to the frontend.
         </div>
       )}
+      {error && <div className="alert alert-warning">{error}</div>}
+      <div className="card card-padded" style={{ marginBottom: 16 }}>
+        <div className="page-title" style={{ fontSize: "1rem", marginBottom: 12 }}>
+          {editingId ? "Update Fee Record" : "Add Fee Record"}
+        </div>
+        <div className="form-grid">
+          <div className="form-group">
+            <label className="form-label">Student</label>
+            <select
+              className="form-control"
+              value={form.student_id}
+              onChange={(event) => setForm((current) => ({ ...current, student_id: event.target.value }))}
+            >
+              <option value="">Select student</option>
+              {students.map((student) => (
+                <option key={student.id} value={student.id}>
+                  {student.full_name || student.name} ({student.index_number || student.index})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Term</label>
+            <input
+              className="form-control"
+              value={form.term}
+              onChange={(event) => setForm((current) => ({ ...current, term: event.target.value }))}
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Amount (GHS)</label>
+            <input
+              type="number"
+              min="0"
+              className="form-control"
+              value={form.amount}
+              onChange={(event) => setForm((current) => ({ ...current, amount: event.target.value }))}
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Paid (GHS)</label>
+            <input
+              type="number"
+              min="0"
+              className="form-control"
+              value={form.paid}
+              onChange={(event) => setForm((current) => ({ ...current, paid: event.target.value }))}
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Due Date</label>
+            <input
+              type="date"
+              className="form-control"
+              value={form.due_date}
+              onChange={(event) => setForm((current) => ({ ...current, due_date: event.target.value }))}
+            />
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <button className="btn btn-blue" onClick={saveFee} disabled={saving || hasFeesError}>
+            {saving ? "Saving..." : editingId ? "Update Fee" : "Save Fee"}
+          </button>
+          {editingId && (
+            <button
+              className="btn btn-outline"
+              onClick={() => {
+                setEditingId(null);
+                setForm({ student_id: "", term: "First Term", amount: "", paid: "0", due_date: "" });
+              }}
+            >
+              Cancel
+            </button>
+          )}
+        </div>
+      </div>
       <div className="stats-grid stats-grid-3" style={{ marginBottom: 20 }}>
         {[
           {
@@ -6229,88 +6393,32 @@ function FeesAdmin({ studentsData, feesData, tableInfo }) {
           </div>
         ))}
       </div>
-      {isMobile ? (
-        <div className="mobile-record-list">
-          {students.map((s, i) => {
-            const fee =
-              fees.find(
-                (item) =>
-                  String(item.student_id) === String(s.id) ||
-                  String(item.index_number) === String(s.index),
-              ) || normalizeFeeRow({}, i);
-            const bal = fee.amount - fee.paid;
-            return (
-              <div key={s.id} className="mobile-record-card">
-                <div className="mobile-record-head">
-                  <div>
-                    <div className="mobile-record-title">{s.full_name}</div>
-                    <div className="mobile-record-sub">{fee.term}</div>
-                  </div>
-                  <span
-                    className={`badge ${fee.status === "paid" ? "badge-success" : fee.status === "partial" ? "badge-warning" : "badge-danger"}`}
-                  >
-                    {fee.status}
-                  </span>
-                </div>
-                <div className="mobile-record-grid">
-                  <div className="mobile-record-item">
-                    <label>Amount</label>
-                    <strong>GHS {fee.amount}</strong>
-                  </div>
-                  <div className="mobile-record-item">
-                    <label>Paid</label>
-                    <strong>GHS {fee.paid}</strong>
-                  </div>
-                  <div className="mobile-record-item">
-                    <label>Balance</label>
-                    <strong style={{ color: bal > 0 ? "#dc2626" : "#16a34a" }}>
-                      GHS {bal}
-                    </strong>
-                  </div>
-                  <div className="mobile-record-item">
-                    <label>Student ID</label>
-                    <span>{s.index}</span>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-          {!students.length && (
-            <div
-              className="mobile-record-card"
-              style={{ textAlign: "center", color: "#64748b" }}
-            >
-              No fee-linked student rows available.
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="card table-wrap">
+      <div className="card table-wrap">
           <table>
             <thead>
               <tr>
                 <th>Student</th>
+                <th>Student ID</th>
                 <th>Term</th>
                 <th>Amount</th>
                 <th>Paid</th>
                 <th>Balance</th>
                 <th>Status</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody>
-              {students.map((s, i) => {
-                const fee =
-                  fees.find(
-                    (item) =>
-                      String(item.student_id) === String(s.id) ||
-                      String(item.index_number) === String(s.index),
-                  ) || normalizeFeeRow({}, i);
+              {fees.map((fee) => {
+                const student = students.find(
+                  (row) => String(row.id) === String(fee.student_id),
+                );
                 const bal = fee.amount - fee.paid;
                 return (
-                  <tr key={s.id}>
+                  <tr key={fee.id}>
                     <td>
-                      <strong>{s.full_name}</strong>
+                      <strong>{student?.full_name || student?.name || fee.index_number || "Student"}</strong>
                     </td>
+                    <td>{fee.index_number || student?.index || student?.index_number || "-"}</td>
                     <td>{fee.term}</td>
                     <td>GHS {fee.amount}</td>
                     <td>GHS {fee.paid}</td>
@@ -6329,27 +6437,31 @@ function FeesAdmin({ studentsData, feesData, tableInfo }) {
                         {fee.status}
                       </span>
                     </td>
+                    <td>
+                      <button className="btn btn-sm btn-outline" onClick={() => editFee(fee)}>
+                        Edit
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
-              {!students.length && (
+              {!fees.length && (
                 <tr>
                   <td
-                    colSpan="6"
+                    colSpan="8"
                     style={{
                       textAlign: "center",
                       padding: 24,
                       color: "#64748b",
                     }}
                   >
-                    No fee-linked student rows available.
+                    No fee records have been saved yet.
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
-        </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -14927,14 +15039,57 @@ function MySelection({ selectionRow, approvalInfo }) {
 
 // â”€â”€â”€ STUDENT DOCS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function DocumentsPage() {
+  const { records: documents, loading, error } =
+    useStudentPortalRecords("student_document");
+  const [downloadError, setDownloadError] = useState("");
+  const downloadDocument = async (document) => {
+    const { data, error: downloadLinkError } = await supabase.storage
+      .from("student-documents")
+      .createSignedUrl(document.storagePath, 60);
+    if (downloadLinkError) {
+      setDownloadError(`Could not open document: ${downloadLinkError.message}`);
+      return;
+    }
+    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+    setDownloadError("");
+  };
   return (
     <div className="fade-in">
       <div className="page-header">
         <div className="page-title">Documents</div>
       </div>
-      <div className="card card-padded" style={{ textAlign: "center" }}>
-        No documents are currently available.
-      </div>
+      {(error || downloadError) && (
+        <div className="alert alert-warning">{downloadError || error}</div>
+      )}
+      {loading ? (
+        <div className="card card-padded">Loading saved documents...</div>
+      ) : documents.length ? (
+        <div className="card table-wrap">
+          <table>
+            <thead>
+              <tr><th>Document</th><th>Type</th><th>Uploaded</th><th>Action</th></tr>
+            </thead>
+            <tbody>
+              {documents.map((document) => (
+                <tr key={document.id}>
+                  <td>{document.fileName}</td>
+                  <td>{document.docType}</td>
+                  <td>{new Date(document.at).toLocaleString()}</td>
+                  <td>
+                    <button className="btn btn-sm btn-outline" onClick={() => downloadDocument(document)}>
+                      Open
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="card card-padded" style={{ textAlign: "center" }}>
+          No documents have been uploaded.
+        </div>
+      )}
     </div>
   );
 }
@@ -15010,7 +15165,13 @@ function PlacementPredictor({ schoolsData }) {
 }
 
 function AssignmentTrackerPage() {
-  const [tasks, setTasks] = useState([
+  const {
+    records: taskStatuses,
+    loading,
+    error,
+    saveRecord,
+  } = useStudentPortalRecords("assignment_status");
+  const assignmentList = [
     {
       id: 1,
       subject: "Mathematics",
@@ -15025,10 +15186,20 @@ function AssignmentTrackerPage() {
       due: "2026-04-18",
       status: "submitted",
     },
-  ]);
+  ];
+  const tasks = assignmentList.map((task) => ({
+    ...task,
+    status:
+      taskStatuses.find(
+        (status) => String(status.assignment_id) === String(task.id),
+      )?.status || task.status,
+  }));
   const isMobile = useIsMobileLayout();
   const update = (id, status) =>
-    setTasks((t) => t.map((x) => (x.id === id ? { ...x, status } : x)));
+    saveRecord(
+      { assignment_id: id, status, updated_at: new Date().toISOString() },
+      String(id),
+    );
   return (
     <div className="fade-in">
       <div className="page-header">
@@ -15037,8 +15208,10 @@ function AssignmentTrackerPage() {
           Track homework, due dates and submission status.
         </div>
       </div>
+      {error && <div className="alert alert-warning">{error}</div>}
       {isMobile ? (
         <div className="mobile-record-list">
+          {loading && <div className="mobile-record-card">Loading saved assignment statuses...</div>}
           {tasks.map((t) => (
             <div key={t.id} className="mobile-record-card">
               <div className="mobile-record-head">
@@ -15078,6 +15251,7 @@ function AssignmentTrackerPage() {
               </tr>
             </thead>
             <tbody>
+              {loading && <tr><td colSpan="5">Loading saved assignment statuses...</td></tr>}
               {tasks.map((t) => (
                 <tr key={t.id}>
                   <td>{t.subject}</td>
@@ -15717,19 +15891,21 @@ function StudentAnalyticsPage({ scoreValues, attendanceData, feesData }) {
 }
 
 function StudyPlannerPage() {
-  const [plan, setPlan] = useState([
-    { id: 1, day: "Monday", focus: "Mathematics - Algebra", duration: "1h" },
-  ]);
+  const { records: plan, loading, error, saveRecord } =
+    useStudentPortalRecords("study_plan");
   const [form, setForm] = useState({
     day: "Monday",
     focus: "",
     duration: "1h",
   });
   const isMobile = useIsMobileLayout();
-  const add = () => {
+  const add = async () => {
     if (!form.focus) return;
-    setPlan((p) => [...p, { id: Date.now(), ...form }]);
-    setForm({ day: "Monday", focus: "", duration: "1h" });
+    const saved = await saveRecord({
+      ...form,
+      created_at: new Date().toISOString(),
+    });
+    if (saved) setForm({ day: "Monday", focus: "", duration: "1h" });
   };
   return (
     <div className="fade-in">
@@ -15737,6 +15913,7 @@ function StudyPlannerPage() {
         <div className="page-title">Study Planner</div>
         <div className="page-sub">Build a weekly revision plan.</div>
       </div>
+      {error && <div className="alert alert-warning">{error}</div>}
       <div className="card card-padded" style={{ marginBottom: 12 }}>
         <div className="form-grid">
           <div className="form-group">
@@ -15790,6 +15967,7 @@ function StudyPlannerPage() {
       </div>
       {isMobile ? (
         <div className="mobile-record-list">
+          {loading && <div className="mobile-record-card">Loading saved sessions...</div>}
           {plan.map((p) => (
             <div key={p.id} className="mobile-record-card">
               <div className="mobile-record-head">
@@ -15813,6 +15991,7 @@ function StudyPlannerPage() {
               </tr>
             </thead>
             <tbody>
+              {loading && <tr><td colSpan="3">Loading saved sessions...</td></tr>}
               {plan.map((p) => (
                 <tr key={p.id}>
                   <td>{p.day}</td>
@@ -15830,24 +16009,27 @@ function StudyPlannerPage() {
 
 function AttendanceCorrectionPage({ attendanceData }) {
   const isMobile = useIsMobileLayout();
-  const [requests, setRequests] = useState([]);
+  const {
+    records: requests,
+    loading,
+    error,
+    saveRecord,
+  } = useStudentPortalRecords("attendance_correction");
   const [note, setNote] = useState("");
   const rows = (attendanceData || []).filter(
     (x) => String(x.status).toLowerCase() !== "present",
   );
-  const submit = (row) => {
+  const submit = async (row) => {
     if (!note.trim()) return;
-    setRequests((r) => [
-      {
-        id: Date.now(),
-        date: row.date,
-        status: row.status,
-        note,
-        state: "pending",
-      },
-      ...r,
-    ]);
-    setNote("");
+    const saved = await saveRecord({
+      date: row.date,
+      attendance_id: row.id,
+      status: row.status,
+      note,
+      state: "pending",
+      submitted_at: new Date().toISOString(),
+    });
+    if (saved) setNote("");
   };
   return (
     <div className="fade-in">
@@ -15855,6 +16037,7 @@ function AttendanceCorrectionPage({ attendanceData }) {
         <div className="page-title">Attendance Correction Requests</div>
         <div className="page-sub">Request review for absent/late records.</div>
       </div>
+      {error && <div className="alert alert-warning">{error}</div>}
       <div className="card card-padded" style={{ marginBottom: 12 }}>
         <label className="form-label">Evidence/Reason</label>
         <textarea
@@ -15868,6 +16051,7 @@ function AttendanceCorrectionPage({ attendanceData }) {
       {isMobile ? (
         <>
           <div className="mobile-record-list" style={{ marginBottom: 12 }}>
+            {loading && <div className="mobile-record-card">Loading saved requests...</div>}
             {rows.map((r) => (
               <div key={r.id} className="mobile-record-card">
                 <div className="mobile-record-head">
@@ -15977,6 +16161,7 @@ function AttendanceCorrectionPage({ attendanceData }) {
                 </tr>
               </thead>
               <tbody>
+                {loading && <tr><td colSpan="4">Loading saved requests...</td></tr>}
                 {requests.map((r) => (
                   <tr key={r.id}>
                     <td>{r.date}</td>
@@ -16014,7 +16199,13 @@ function StudentPaymentsPage({ feesData }) {
   const { cfg } = useContext(SettingsContext);
   const feesEnabled = cfg.studentFeesPortalEnabled !== false;
   const isMobile = useIsMobileLayout();
-  const [payments, setPayments] = useState([]);
+  const {
+    records: payments,
+    loading,
+    error,
+    saveRecord,
+  } = useStudentPortalRecords("payment_notice");
+  const [formError, setFormError] = useState("");
   const [form, setForm] = useState({
     term: feesData?.[0]?.term || "First Term",
     amount: "",
@@ -16036,27 +16227,38 @@ function StudentPaymentsPage({ feesData }) {
     );
   }
 
-  const pay = () => {
-    if (!form.amount) return;
-    setPayments((p) => [
-      {
-        id: Date.now(),
-        ...form,
-        receipt: `PAY-${String(Date.now()).slice(-6)}`,
-        at: new Date().toISOString(),
-      },
-      ...p,
-    ]);
-    setForm((f) => ({ ...f, amount: "" }));
+  const pay = async () => {
+    const amount = Number(form.amount);
+    const selectedFee = (feesData || []).find((fee) => fee.term === form.term);
+    const balance = selectedFee
+      ? Math.max(Number(selectedFee.amount || 0) - Number(selectedFee.paid || 0), 0)
+      : 0;
+    if (!Number.isFinite(amount) || amount <= 0 || amount > balance) {
+      setFormError("Enter an amount greater than zero and no more than the outstanding balance for that term.");
+      return;
+    }
+    setFormError("");
+    const saved = await saveRecord({
+      term: form.term,
+      fee_id: selectedFee?.id || null,
+      amount,
+      method: form.method,
+      status: "pending_verification",
+      submitted_at: new Date().toISOString(),
+    });
+    if (saved) setForm((current) => ({ ...current, amount: "" }));
   };
   return (
     <div className="fade-in">
       <div className="page-header">
         <div className="page-title">Pay Fees</div>
         <div className="page-sub">
-          Initiate direct payments and get receipt references.
+          Submit a payment notice for the school to verify. This does not process a payment.
         </div>
       </div>
+      {(error || formError) && (
+        <div className="alert alert-warning">{formError || error}</div>
+      )}
       <div className="card card-padded" style={{ marginBottom: 12 }}>
         <div className="form-grid">
           <div className="form-group">
@@ -16066,8 +16268,8 @@ function StudentPaymentsPage({ feesData }) {
               value={form.term}
               onChange={(e) => setForm((f) => ({ ...f, term: e.target.value }))}
             >
-              {(feesData || []).map((x) => (
-                <option key={x.id}>{x.term}</option>
+              {Array.from(new Set((feesData || []).map((fee) => fee.term))).map((term) => (
+                <option key={term}>{term}</option>
               ))}
             </select>
           </div>
@@ -16102,18 +16304,19 @@ function StudentPaymentsPage({ feesData }) {
           style={{ marginTop: 10 }}
           onClick={pay}
         >
-          Pay Now
+          Submit Payment Notice
         </button>
       </div>
       {isMobile ? (
         <div className="mobile-record-list">
+          {loading && <div className="mobile-record-card">Loading saved payment notices...</div>}
           {payments.map((p) => (
             <div key={p.id} className="mobile-record-card">
               <div className="mobile-record-head">
                 <div>
                   <div className="mobile-record-title">{p.term}</div>
                   <div className="mobile-record-sub">
-                    {new Date(p.at).toLocaleString()}
+                    {new Date(p.submitted_at).toLocaleString()}
                   </div>
                 </div>
                 <strong>GHS {p.amount}</strong>
@@ -16124,8 +16327,8 @@ function StudentPaymentsPage({ feesData }) {
                   <span>{p.method}</span>
                 </div>
                 <div className="mobile-record-item">
-                  <label>Receipt</label>
-                  <strong>{p.receipt}</strong>
+                  <label>Status</label>
+                  <strong>{String(p.status || "").replaceAll("_", " ")}</strong>
                 </div>
               </div>
             </div>
@@ -16148,18 +16351,19 @@ function StudentPaymentsPage({ feesData }) {
                 <th>Term</th>
                 <th>Amount</th>
                 <th>Method</th>
-                <th>Receipt</th>
+                <th>Status</th>
               </tr>
             </thead>
             <tbody>
+              {loading && <tr><td colSpan="5">Loading saved payment notices...</td></tr>}
               {payments.map((p) => (
                 <tr key={p.id}>
-                  <td>{new Date(p.at).toLocaleString()}</td>
+                  <td>{new Date(p.submitted_at).toLocaleString()}</td>
                   <td>{p.term}</td>
                   <td>GHS {p.amount}</td>
                   <td>{p.method}</td>
                   <td>
-                    <strong>{p.receipt}</strong>
+                    <strong>{String(p.status || "").replaceAll("_", " ")}</strong>
                   </td>
                 </tr>
               ))}
@@ -16188,11 +16392,16 @@ function StudentPaymentsPage({ feesData }) {
 function StudentPaymentPlansPage({ feesData }) {
   const { cfg } = useContext(SettingsContext);
   const feesEnabled = cfg.studentFeesPortalEnabled !== false;
+  const {
+    records: plans,
+    loading,
+    error,
+    saveRecord,
+  } = useStudentPortalRecords("payment_plan");
   const outstanding = (feesData || []).reduce(
     (s, f) => s + Math.max(Number(f.amount || 0) - Number(f.paid || 0), 0),
     0,
   );
-  const [plan, setPlan] = useState(null);
   const [months, setMonths] = useState(3);
   if (!feesEnabled) {
     return (
@@ -16208,13 +16417,14 @@ function StudentPaymentPlansPage({ feesData }) {
     );
   }
 
-  const requestPlan = () => {
+  const requestPlan = async () => {
     if (!outstanding) return;
-    setPlan({
+    await saveRecord({
       total: outstanding,
       months,
       installment: Math.ceil(outstanding / months),
       status: "requested",
+      submitted_at: new Date().toISOString(),
     });
   };
   return (
@@ -16223,6 +16433,7 @@ function StudentPaymentPlansPage({ feesData }) {
         <div className="page-title">Payment Plan Request</div>
         <div className="page-sub">Apply for fee installment support.</div>
       </div>
+      {error && <div className="alert alert-warning">{error}</div>}
       <div className="card card-padded">
         <div style={{ marginBottom: 10 }}>
           Outstanding Balance: <strong>GHS {outstanding}</strong>
@@ -16247,19 +16458,24 @@ function StudentPaymentPlansPage({ feesData }) {
         >
           Request Plan
         </button>
-        {plan && (
-          <div className="alert alert-info" style={{ marginTop: 12 }}>
-            Plan requested: {plan.months} months at GHS {plan.installment}/month
-            ({plan.status}).
+        {loading && <div className="alert alert-info" style={{ marginTop: 12 }}>Loading saved requests...</div>}
+        {plans.map((plan) => (
+          <div className="alert alert-info" style={{ marginTop: 12 }} key={plan.id}>
+            Plan requested: {plan.months} months at GHS {plan.installment}/month ({plan.status}).
           </div>
-        )}
+        ))}
       </div>
     </div>
   );
 }
 
 function PersonalizedAnnouncementsPage() {
-  const [readIds, setReadIds] = useState([]);
+  const {
+    records: readRecords,
+    error,
+    saveRecord,
+  } = useStudentPortalRecords("announcement_read");
+  const readIds = readRecords.map((record) => String(record.announcement_id));
   const items = ANNOUNCEMENTS.map((a) => ({
     ...a,
     audience:
@@ -16269,7 +16485,11 @@ function PersonalizedAnnouncementsPage() {
           ? "Current Cohort"
           : "My Class",
   }));
-  const markRead = (id) => setReadIds((r) => (r.includes(id) ? r : [...r, id]));
+  const markRead = (id) =>
+    saveRecord(
+      { announcement_id: id, read_at: new Date().toISOString() },
+      String(id),
+    );
   return (
     <div className="fade-in">
       <div className="page-header">
@@ -16277,6 +16497,7 @@ function PersonalizedAnnouncementsPage() {
         <div className="page-sub">
           Unread/read announcements targeted to your cohort.
         </div>
+        {error && <div className="alert alert-warning">{error}</div>}
       </div>
       <div style={{ display: "grid", gap: 10 }}>
         {items.map((a) => (
@@ -16284,15 +16505,15 @@ function PersonalizedAnnouncementsPage() {
             key={a.id}
             className="card card-padded"
             style={{
-              borderLeft: `4px solid ${readIds.includes(a.id) ? "#cbd5e1" : "#1d4ed8"}`,
+              borderLeft: `4px solid ${readIds.includes(String(a.id)) ? "#cbd5e1" : "#1d4ed8"}`,
             }}
           >
             <div className="announcement-head">
               <div style={{ fontWeight: 700 }}>{a.title}</div>
               <span
-                className={`badge ${readIds.includes(a.id) ? "badge-gray" : "badge-blue"}`}
+                className={`badge ${readIds.includes(String(a.id)) ? "badge-gray" : "badge-blue"}`}
               >
-                {readIds.includes(a.id) ? "read" : "unread"}
+                {readIds.includes(String(a.id)) ? "read" : "unread"}
               </span>
             </div>
             <div style={{ fontSize: ".84rem", color: "#64748b", marginTop: 4 }}>
@@ -16315,23 +16536,63 @@ function PersonalizedAnnouncementsPage() {
 
 function StudentUploadDocsPage() {
   const isMobile = useIsMobileLayout();
-  const [uploads, setUploads] = useState([]);
+  const {
+    records: uploads,
+    loading,
+    error,
+    studentId,
+    saveRecord,
+  } = useStudentPortalRecords("student_document");
+  const [uploadError, setUploadError] = useState("");
+  const [uploading, setUploading] = useState(false);
   const [docType, setDocType] = useState("ID Document");
-  const onPick = (e) => {
+  const onPick = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setUploads((u) => [
-      {
-        id: Date.now(),
+    const allowedTypes = ["application/pdf", "image/jpeg", "image/png", "image/webp"];
+    if (!allowedTypes.includes(file.type) || file.size > 10 * 1024 * 1024) {
+      setUploadError("Choose a PDF, JPEG, PNG, or WebP file no larger than 10 MB.");
+      e.target.value = "";
+      return;
+    }
+    if (!studentId || !supabase) {
+      setUploadError("Sign in with a linked student account before uploading documents.");
+      e.target.value = "";
+      return;
+    }
+
+    setUploading(true);
+    setUploadError("");
+    const fileName = file.name.replace(/[^\w.-]+/g, "_");
+    const storagePath = `${studentId}/${globalThis.crypto.randomUUID()}-${fileName}`;
+    try {
+      const { error: storageError } = await supabase.storage
+        .from("student-documents")
+        .upload(storagePath, file, { contentType: file.type, upsert: false });
+      if (storageError) throw storageError;
+
+      const saved = await saveRecord({
         docType,
         fileName: file.name,
         size: file.size,
         status: "submitted",
+        storagePath,
         at: new Date().toISOString(),
-      },
-      ...u,
-    ]);
-    e.target.value = "";
+      });
+      if (!saved) {
+        const { error: cleanupError } = await supabase.storage
+          .from("student-documents")
+          .remove([storagePath]);
+        if (cleanupError) {
+          setUploadError(`Document metadata was not saved and uploaded file cleanup failed: ${cleanupError.message}`);
+        }
+      }
+    } catch (uploadError) {
+      setUploadError(`Document was not uploaded: ${uploadError.message || "Supabase request failed."}`);
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
   };
   return (
     <div className="fade-in">
@@ -16340,6 +16601,7 @@ function StudentUploadDocsPage() {
         <div className="page-sub">
           Submit required files and track verification status.
         </div>
+        {(error || uploadError) && <div className="alert alert-warning">{uploadError || error}</div>}
       </div>
       <div className="card card-padded" style={{ marginBottom: 12 }}>
         <div className="form-group form-group-narrow">
@@ -16355,10 +16617,17 @@ function StudentUploadDocsPage() {
             <option>Payment Proof</option>
           </select>
         </div>
-        <input type="file" onChange={onPick} />
+        <input
+          type="file"
+          accept=".pdf,.jpg,.jpeg,.png,.webp"
+          onChange={onPick}
+          disabled={uploading}
+        />
+        {uploading && <div className="alert alert-info">Uploading document to Supabase...</div>}
       </div>
       {isMobile ? (
         <div className="mobile-record-list">
+          {loading && <div className="mobile-record-card">Loading saved uploads...</div>}
           {uploads.map((u) => (
             <div key={u.id} className="mobile-record-card">
               <div className="mobile-record-head">
@@ -16399,6 +16668,7 @@ function StudentUploadDocsPage() {
               </tr>
             </thead>
             <tbody>
+              {loading && <tr><td colSpan="4">Loading saved uploads...</td></tr>}
               {uploads.map((u) => (
                 <tr key={u.id}>
                   <td>{new Date(u.at).toLocaleString()}</td>
@@ -16480,16 +16750,22 @@ function CalendarSyncPage() {
 }
 
 function StudentTicketsPage() {
-  const [tickets, setTickets] = useState([]);
+  const {
+    records: tickets,
+    loading,
+    error,
+    saveRecord,
+  } = useStudentPortalRecords("support_ticket");
   const [form, setForm] = useState({ subject: "", message: "" });
   const isMobile = useIsMobileLayout();
-  const submit = () => {
+  const submit = async () => {
     if (!form.subject || !form.message) return;
-    setTickets((t) => [
-      { id: Date.now(), ...form, status: "open", at: new Date().toISOString() },
-      ...t,
-    ]);
-    setForm({ subject: "", message: "" });
+    const saved = await saveRecord({
+      ...form,
+      status: "open",
+      submitted_at: new Date().toISOString(),
+    });
+    if (saved) setForm({ subject: "", message: "" });
   };
   return (
     <div className="fade-in">
@@ -16497,6 +16773,7 @@ function StudentTicketsPage() {
         <div className="page-title">Support Tickets</div>
         <div className="page-sub">Create and track your support requests.</div>
       </div>
+      {error && <div className="alert alert-warning">{error}</div>}
       <div className="card card-padded" style={{ marginBottom: 12 }}>
         <div className="form-grid">
           <div className="form-group">
@@ -16530,13 +16807,14 @@ function StudentTicketsPage() {
       </div>
       {isMobile ? (
         <div className="mobile-record-list">
+          {loading && <div className="mobile-record-card">Loading saved tickets...</div>}
           {tickets.map((t) => (
             <div key={t.id} className="mobile-record-card">
               <div className="mobile-record-head">
                 <div>
                   <div className="mobile-record-title">{t.subject}</div>
                   <div className="mobile-record-sub">
-                    {new Date(t.at).toLocaleString()}
+                    {new Date(t.submitted_at).toLocaleString()}
                   </div>
                 </div>
                 <span className="badge badge-warning">{t.status}</span>
@@ -16567,9 +16845,10 @@ function StudentTicketsPage() {
               </tr>
             </thead>
             <tbody>
+              {loading && <tr><td colSpan="3">Loading saved tickets...</td></tr>}
               {tickets.map((t) => (
                 <tr key={t.id}>
-                  <td>{new Date(t.at).toLocaleString()}</td>
+                  <td>{new Date(t.submitted_at).toLocaleString()}</td>
                   <td>{t.subject}</td>
                   <td>
                     <span className="badge badge-warning">{t.status}</span>
@@ -16599,17 +16878,41 @@ function StudentTicketsPage() {
 }
 
 function StudentGoalsPage() {
+  const {
+    records: goals,
+    loading,
+    error,
+    saveRecord,
+  } = useStudentPortalRecords("student_goal");
+  const savedGoal = goals[0];
   const [goal, setGoal] = useState({
     aggregateTarget: 8,
     attendanceTarget: 95,
   });
-  const progress = { aggregateNow: 12, attendanceNow: 88 };
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (savedGoal) {
+      setGoal({
+        aggregateTarget: Number(savedGoal.aggregateTarget ?? 8),
+        attendanceTarget: Number(savedGoal.attendanceTarget ?? 95),
+      });
+    }
+  }, [savedGoal?.id]);
+  const saveGoal = async () => {
+    setSaving(true);
+    try {
+      await saveRecord(goal, "goal");
+    } finally {
+      setSaving(false);
+    }
+  };
   return (
     <div className="fade-in">
       <div className="page-header">
         <div className="page-title">Goals & Targets</div>
         <div className="page-sub">Set academic and attendance targets.</div>
       </div>
+      {error && <div className="alert alert-warning">{error}</div>}
       <div className="card card-padded">
         <div className="form-grid">
           <div className="form-group">
@@ -16641,16 +16944,10 @@ function StudentGoalsPage() {
             />
           </div>
         </div>
-        <div style={{ marginTop: 12 }}>
-          <div className="alert alert-info">
-            Current Aggregate: {progress.aggregateNow} (Target{" "}
-            {goal.aggregateTarget})
-          </div>
-          <div className="alert alert-info">
-            Current Attendance: {progress.attendanceNow}% (Target{" "}
-            {goal.attendanceTarget}%)
-          </div>
-        </div>
+        <button className="btn btn-blue" style={{ marginTop: 12 }} onClick={saveGoal} disabled={saving || loading}>
+          {saving ? "Saving..." : "Save Goals"}
+        </button>
+        {loading && <div className="alert alert-info" style={{ marginTop: 12 }}>Loading saved goals...</div>}
       </div>
     </div>
   );
@@ -21804,7 +22101,7 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
   const [registrySetupError, setRegistrySetupError] = useState("");
   const [pendingSelections, setPendingSelections] = useState([]);
   const [confirmedSelections, setConfirmedSelections] = useState([]);
-  const [feesData, setFeesData] = useState(FEES_DATA);
+  const [feesData, setFeesData] = useState([]);
   const [teachersData, setTeachersData] = useState(TEACHERS_DATA);
   const [loadingAdminData, setLoadingAdminData] = useState(!!supabase);
   const [databaseTables, setDatabaseTables] = useState({
@@ -22446,9 +22743,7 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
       .from("fees")
       .select("*")
       .order("id", { ascending: false });
-    if (Array.isArray(fees) && fees.length) {
-      setFeesData(fees.map(normalizeFeeRow));
-    }
+    setFeesData(Array.isArray(fees) ? fees.map(normalizeFeeRow) : []);
 
     const { data: teachers } = await supabase
       .from("teachers")
@@ -24038,6 +24333,7 @@ function SchoolAdminPortal({ user, onLogout, darkMode, onToggleDark }) {
           studentsData={schoolStudents}
           feesData={schoolFeesData}
           tableInfo={schoolTableInfo.fees}
+          registeredSchoolId={school?.id ?? null}
         />
       ),
       teachers: (
@@ -24840,6 +25136,7 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
   const [studentData, setStudentData] = useState(null);
   const [attendanceData, setAttendanceData] = useState([]);
   const [feesData, setFeesData] = useState([]);
+  const [studentDataError, setStudentDataError] = useState("");
   const [selectionRow, setSelectionRow] = useState(null);
   const [scoreValues, setScoreValues] = useState([]);
   const [chatUsers, setChatUsers] = useState([
@@ -25114,207 +25411,139 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
 
   useEffect(() => {
     const loadStudentPortalData = async () => {
-      if (!supabase) return;
+      setStudentDataError("");
+      setStudentData(null);
+      setAttendanceData([]);
+      setFeesData([]);
+      setScoreValues([]);
+      setSelectionRow(null);
+      if (!supabase) {
+        setStudentDataError("Supabase is not configured; student records cannot be loaded.");
+        return;
+      }
+      if (!user?.id) {
+        setStudentDataError("This student account is not linked to a student record.");
+        return;
+      }
 
-      const identifier = String(user?.index || "");
-      const resolveStudent = async () => {
-        let student = null;
-        const studentLookups = [];
-        if (/^\d{12}$/.test(identifier)) {
-          studentLookups.push(() =>
-            supabase
-              .from("students")
-              .select("*")
-              .eq("index_number", identifier)
-              .limit(1)
-              .maybeSingle(),
-          );
-          studentLookups.push(() =>
-            supabase
-              .from("students")
-              .select("*")
-              .eq("index", identifier)
-              .limit(1)
-              .maybeSingle(),
-          );
-        }
-        if (user?.email && !String(user.email).endsWith("@student.local")) {
-          studentLookups.push(() =>
-            supabase
-              .from("students")
-              .select("*")
-              .eq("email", user.email)
-              .limit(1)
-              .maybeSingle(),
-          );
-        }
-        for (const run of studentLookups) {
-          const { data, error } = await run();
-          if (error) {
-            if (isMissingColumnError(error)) continue;
-            continue;
-          }
-          if (data) {
-            student = data;
-            break;
-          }
-        }
-        return student;
-      };
-
-      const [{ data: schools }, student] = await Promise.all([
+      const [
+        { data: student, error: studentError },
+        { data: schools, error: schoolsError },
+      ] = await Promise.all([
+        supabase.from("students").select("*").eq("id", user.id).maybeSingle(),
         supabase.from("schools").select("*").order("name", { ascending: true }),
-        resolveStudent(),
       ]);
 
-      if (Array.isArray(schools) && schools.length) {
+      if (studentError) {
+        setStudentDataError(`Student record could not be loaded: ${studentError.message}`);
+        return;
+      }
+      if (!student) {
+        setStudentDataError("No student record is linked to this account.");
+        return;
+      }
+      if (schoolsError) {
+        setStudentDataError(`School records could not be loaded: ${schoolsError.message}`);
+      } else if (Array.isArray(schools)) {
         setSchoolsData(sortSchoolsByCategory(schools.map(normalizeSchoolRow)));
       }
 
-      if (student) {
-        setStudentData({
-          ...student,
-          full_name:
-            student.full_name || student.name || user?.name || "Student",
-          index: student.index || student.index_number || identifier,
-          class: student.class || student.class_name || "",
-          region: student.region || "Unknown",
-          aggregate: Number(student.aggregate ?? 0),
-          photo_url: resolveStudentPhotoUrl(student),
-          gender: student.gender || "",
-          date_of_birth: student.date_of_birth || "",
-          parent_contact: student.parent_contact || "",
-          personal_contact: student.personal_contact || "",
-          home_address: student.home_address || "",
-          home_town: student.home_town || "",
-          place_of_residence: student.place_of_residence || "",
-          postal_town: student.postal_town || "",
-          po_box: student.po_box || "",
-          status: student.status || "",
-        });
+      const identifier = String(student.index_number || student.index || user?.index || "");
+      setStudentData({
+        ...student,
+        full_name: student.full_name || student.name || user?.name || "Student",
+        index: student.index || student.index_number || identifier,
+        class: student.class || student.class_name || "",
+        region: student.region || "Unknown",
+        aggregate: Number(student.aggregate ?? 0),
+        photo_url: resolveStudentPhotoUrl(student),
+        gender: student.gender || "",
+        date_of_birth: student.date_of_birth || "",
+        parent_contact: student.parent_contact || "",
+        personal_contact: student.personal_contact || "",
+        home_address: student.home_address || "",
+        home_town: student.home_town || "",
+        place_of_residence: student.place_of_residence || "",
+        postal_town: student.postal_town || "",
+        po_box: student.po_box || "",
+        status: student.status || "",
+      });
 
-        const runFirstSuccessful = async (runs) => {
-          for (const run of runs) {
-            const { data, error } = await run();
-            if (error) {
-              if (isMissingColumnError(error)) continue;
-              continue;
-            }
-            if (Array.isArray(data) && data.length) return data;
-          }
-          return [];
-        };
+      const [
+        { data: attendanceRows, error: attendanceError },
+        { data: feeRows, error: feeError },
+        { data: scoreRows, error: scoreError },
+        selection,
+      ] = await Promise.all([
+        supabase
+          .from("attendance")
+          .select("*")
+          .eq("student_id", student.id)
+          .order("date", { ascending: false }),
+        supabase
+          .from("fees")
+          .select("*")
+          .eq("student_id", student.id)
+          .order("id", { ascending: false }),
+        supabase.from("scores").select("score").eq("student_id", student.id),
+        fetchStudentSelection({
+          supabase,
+          userEmail: user?.email || getSessionUserEmail(),
+          studentData: {
+            id: student.id,
+            index: student.index || student.index_number,
+            index_number: student.index_number || student.index,
+            full_name: student.full_name || student.name || user?.name || "",
+          },
+        }),
+      ]);
 
-        const idx = student.index_number || student.index;
-        const [attendanceRows, feeRows, scoreRows, selection] =
-          await Promise.all([
-            runFirstSuccessful([
-              () =>
-                supabase
-                  .from("attendance")
-                  .select("*")
-                  .eq("student_id", student.id)
-                  .order("date", { ascending: false }),
-              ...(idx
-                ? [
-                    () =>
-                      supabase
-                        .from("attendance")
-                        .select("*")
-                        .eq("index_number", idx)
-                        .order("date", { ascending: false }),
-                  ]
-                : []),
-            ]),
-            runFirstSuccessful([
-              () =>
-                supabase
-                  .from("fees")
-                  .select("*")
-                  .eq("student_id", student.id)
-                  .order("id", { ascending: false }),
-              ...(idx
-                ? [
-                    () =>
-                      supabase
-                        .from("fees")
-                        .select("*")
-                        .eq("index_number", idx)
-                        .order("id", { ascending: false }),
-                  ]
-                : []),
-            ]),
-            runFirstSuccessful([
-              () =>
-                supabase
-                  .from("scores")
-                  .select("score")
-                  .eq("student_id", student.id),
-              ...(idx
-                ? [
-                    () =>
-                      supabase
-                        .from("scores")
-                        .select("score")
-                        .eq("index_number", idx),
-                  ]
-                : []),
-            ]),
-            fetchStudentSelection({
-              supabase,
-              userEmail: user?.email || getSessionUserEmail(),
-              studentData: {
-                id: student.id,
-                index: student.index || student.index_number,
-                index_number: student.index_number || student.index,
-                full_name:
-                  student.full_name || student.name || user?.name || "",
-              },
-            }),
-          ]);
-
-        if (Array.isArray(attendanceRows) && attendanceRows.length) {
-          setAttendanceData(
-            attendanceRows.map((r, i) => ({
-              id: r.id ?? i + 1,
-              date: r.date || r.day || "-",
-              status: r.status || "Present",
-            })),
-          );
-        }
-
-        if (Array.isArray(feeRows) && feeRows.length) {
-          setFeesData(
-            feeRows.map((f, i) => ({
-              id: f.id ?? i + 1,
-              term: f.term || f.semester || `Term ${i + 1}`,
-              amount: Number(f.amount ?? f.total ?? 0),
-              paid: Number(f.paid ?? f.amount_paid ?? 0),
-              status:
-                f.status ||
-                (Number(f.paid ?? 0) >= Number(f.amount ?? 0)
-                  ? "paid"
-                  : Number(f.paid ?? 0) > 0
-                    ? "partial"
-                    : "unpaid"),
-            })),
-          );
-        }
-
-        if (Array.isArray(scoreRows) && scoreRows.length) {
-          setScoreValues(
-            scoreRows
-              .map((row) => Number(row?.score ?? 0))
-              .filter((v) => Number.isFinite(v) && v >= 0),
-          );
-        }
-
-        if (selection) setSelectionRow(selection);
+      const loadErrors = [
+        attendanceError && `Attendance: ${attendanceError.message}`,
+        feeError && `Fees: ${feeError.message}`,
+        scoreError && `Scores: ${scoreError.message}`,
+      ].filter(Boolean);
+      if (loadErrors.length) {
+        setStudentDataError((current) =>
+          [current, ...loadErrors].filter(Boolean).join(" "),
+        );
       }
+      setAttendanceData(
+        (attendanceRows || []).map((row, index) => ({
+          id: row.id ?? index + 1,
+          date: row.date || row.day || "-",
+          status: row.status || "Present",
+        })),
+      );
+      setFeesData(
+        (feeRows || []).map((fee, index) => ({
+          id: fee.id ?? index + 1,
+          term: fee.term || fee.semester || `Term ${index + 1}`,
+          amount: Number(fee.amount ?? fee.total ?? 0),
+          paid: Number(fee.paid ?? fee.amount_paid ?? 0),
+          status:
+            fee.status ||
+            (Number(fee.paid ?? 0) >= Number(fee.amount ?? 0)
+              ? "paid"
+              : Number(fee.paid ?? 0) > 0
+                ? "partial"
+                : "unpaid"),
+        })),
+      );
+      setScoreValues(
+        (scoreRows || [])
+          .map((row) => Number(row?.score ?? 0))
+          .filter((value) => Number.isFinite(value) && value >= 0),
+      );
+      setSelectionRow(selection || null);
     };
 
-    loadStudentPortalData();
-  }, [user?.email, user?.index, user?.name]);
+    loadStudentPortalData().catch((error) => {
+      setStudentDataError(
+        `Student records could not be loaded: ${error?.message || "Supabase request failed."}`,
+      );
+    });
+  }, [user?.email, user?.id, user?.index, user?.name]);
 
   useEffect(() => {
     if (tab === "my-selection") {
@@ -25672,6 +25901,15 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
             >
               ⚠️ System is currently under maintenance. Some features may be
               unavailable.
+            </div>
+          )}
+          {studentDataError && (
+            <div
+              className="alert alert-warning"
+              role="alert"
+              style={{ margin: "16px 16px 0", borderRadius: 8 }}
+            >
+              {studentDataError}
             </div>
           )}
           {renderPage()}

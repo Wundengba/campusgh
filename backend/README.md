@@ -12,6 +12,12 @@ Apply [supabase/migrations/023_student_phone_otp_auth.sql](supabase/migrations/0
 
 Apply [supabase/migrations/024_student_id_password_auth.sql](supabase/migrations/024_student_id_password_auth.sql) after 023 to remove the former OTP account-link endpoint. Student sign-in uses the 12-digit ID and password through Supabase Auth; Phone Auth and SMS provider setup are not required.
 
+After 024, apply [supabase/migrations/025_student_portal_records.sql](supabase/migrations/025_student_portal_records.sql) and then [supabase/migrations/026_student_document_storage.sql](supabase/migrations/026_student_document_storage.sql). Migration 025 adds student-owned records for study plans, payment notices, payment-plan requests, attendance corrections, support tickets, goals, document metadata, assignment status, and announcement-read state. It also replaces the public fees policy with student read-only access and admin or school-scoped school-admin management. Migration 026 creates a private document bucket with per-student folder access.
+
+The student payment form only saves a payment notice for staff verification; it does not charge a card, transfer funds, or generate a transaction receipt. Actual payment processing requires selecting and integrating a payment provider.
+
+These changes persist the implemented, connected workflows; they do not turn static/demo pages or placeholder features into real services. Some older tables outside these migrations still have permissive policies from the original setup. Review and replace those policies with authenticated, role- and school-scoped RLS before storing production personal, academic, or financial data. Applying these migrations is required before the newly connected student workflows and private document uploads can be used.
+
 Student accounts must be provisioned by an administrator; the app does not create student passwords or store them in the database. Set the student's initial Supabase Auth password to the parent/guardian contact recorded in `students.parent_contact` (use the exact value as stored). For each student:
 
 1. In Supabase Authentication → Users, create or update the Auth user with email `student-<12-digit-ID>@students.campusghana.invalid`, set its password to the student's recorded parent/guardian contact, and mark the email as confirmed. For an existing OTP-linked account, update the existing user's email and password so its Auth UID and student link stay the same.

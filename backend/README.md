@@ -8,6 +8,44 @@ The core tables and migration `001_public_portal_tables.sql` are already applied
 
 If you already ran that combined script, apply [supabase/migrations/022_fix_study_group_and_parent_message_rls.sql](supabase/migrations/022_fix_study_group_and_parent_message_rls.sql) separately to fix recursive study-group policies and parent-teacher message permissions. Do not rerun the combined script just to apply this fix.
 
+Apply [supabase/migrations/023_student_phone_otp_auth.sql](supabase/migrations/023_student_phone_otp_auth.sql) after migration 022. It adds Auth-to-student linking, authenticated profile/student policies, study-feature RLS mappings, cloud-backed study progress fields, per-account display preferences, and the score uniqueness required by score updates. It stops with an explicit error if duplicate student/subject/exam scores must be resolved first.
+
+Apply [supabase/migrations/024_student_id_password_auth.sql](supabase/migrations/024_student_id_password_auth.sql) after 023 to remove the former OTP account-link endpoint. Student sign-in uses the 12-digit ID and password through Supabase Auth; Phone Auth and SMS provider setup are not required.
+
+Student accounts must be provisioned by an administrator; the app does not create student passwords or store them in the database. Set the student's initial Supabase Auth password to the parent/guardian contact recorded in `students.parent_contact` (use the exact value as stored). For each student:
+
+1. In Supabase Authentication → Users, create or update the Auth user with email `student-<12-digit-ID>@students.campusghana.invalid`, set its password to the student's recorded parent/guardian contact, and mark the email as confirmed. For an existing OTP-linked account, update the existing user's email and password so its Auth UID and student link stay the same.
+2. Run this in the SQL Editor, replacing the sample ID in both places. Confirm that the student row is linked and the profile row has role `student`.
+
+```sql
+update public.students as s
+   set auth_user_id = u.id
+  from auth.users as u
+ where (s.index_number = '123456789012' or s."index" = '123456789012')
+   and lower(u.email) = lower('student-123456789012@students.campusghana.invalid');
+
+insert into public.profiles (id, email, full_name, role)
+select u.id, u.email, s.full_name, 'student'
+  from auth.users as u
+  join public.students as s on s.auth_user_id = u.id
+ where (s.index_number = '123456789012' or s."index" = '123456789012')
+on conflict (id) do update
+  set email = excluded.email,
+      full_name = excluded.full_name
+  where public.profiles.role = 'student';
+```
+
+The guardian contact is a weak, guessable password and may be shared by siblings. Treat it only as a temporary credential and change it to a unique password in Supabase Auth as soon as possible. Never put student passwords in `students`, `users`, or frontend code; Supabase Auth stores the password hash.
+
+Staff must be created in Supabase Authentication with email/password and separately provisioned with a trusted profile role. After creating the Auth user, use its Auth UID in SQL Editor, for example:
+
+```sql
+insert into public.profiles (id, email, full_name, role)
+values ('AUTH_USER_UUID', 'staff@example.com', 'Staff Name', 'admin');
+```
+
+Use an existing supported role (`admin`, `teacher`, `staff`, or `student`) and never accept role assignment from a public signup form.
+
 For a fresh Supabase project, first run [supabase/migrations/create_users_students_scores_with_rls.sql](supabase/migrations/create_users_students_scores_with_rls.sql) and [supabase/migrations/001_public_portal_tables.sql](supabase/migrations/001_public_portal_tables.sql), then run the combined remaining-migrations script.
 
 For the separate registered-school registry and school-admin login flow, also run [supabase/migrations/003_registered_schools_and_school_admins.sql](supabase/migrations/003_registered_schools_and_school_admins.sql).
@@ -57,4 +95,4 @@ Migration `007_backfill_teacher_registered_school_scope.sql` backfills `teachers
 
 Migration `008_expand_teacher_profile_fields.sql` adds teacher profile columns used by the frontend add/edit form: `employee_id`, `gender`, `date_of_birth`, `qualification`, `hire_date`, and `address`.
 
-Security note: the generated policies are intentionally open because the current app already uses public client-side reads and writes. For production, replace them with proper authenticated policies.
+Security note: the original migrations grant open access to many operational tables. Migration 023 restricts profiles and students, but attendance, fees, scores, results, school selections, and several other tables still need authenticated, role-aware RLS policies before real personal or financial data is used. The anon key is public and does not replace RLS.

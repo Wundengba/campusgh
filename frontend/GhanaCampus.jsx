@@ -116,42 +116,6 @@ const resolvePortalFromAccount = (record, fallback = "student") => {
   return roleKey === "student" ? "student" : "admin";
 };
 
-const ensureSupabaseProfile = async (authUser, fallbackRole = "student") => {
-  if (!supabase || !authUser?.id || !profilesTableAvailable) return null;
-
-  const resolvedRole = normalizeRoleKey(
-    authUser.user_metadata?.role || fallbackRole || "student",
-  );
-  const profilePayload = {
-    id: authUser.id,
-    email: authUser.email,
-    full_name:
-      authUser.user_metadata?.full_name || authUser.email || "",
-    role: resolvedRole,
-    registered_school_id:
-      authUser.user_metadata?.registered_school_id ?? null,
-    managed_school_name:
-      authUser.user_metadata?.managed_school_name || "",
-  };
-
-  const { data, error } = await supabase
-    .from("profiles")
-    .upsert(profilePayload, { onConflict: "id" })
-    .select()
-    .maybeSingle();
-
-  if (error) {
-    if (isProfilesTableMissingError(error)) {
-      profilesTableAvailable = false;
-      return null;
-    }
-    console.warn("Could not sync Supabase profile:", error.message || error);
-    return null;
-  }
-
-  return data;
-};
-
 const BASE_ROLE_CATALOG = [
   {
     key: "admin",
@@ -6023,7 +5987,7 @@ function AttendancePage({
           if (error && !isMissingColumnError(error)) {
             const { error: upsertError } = await supabase
               .from("attendance")
-              .upsert(item);
+                .upsert(item, { onConflict: "student_id,date" });
             if (upsertError) throw upsertError;
           }
         }
@@ -14558,6 +14522,8 @@ function SchoolSelection({ schoolsData, studentData }) {
   const maxChoices = cfg.maxChoices || 7;
   const [selected, setSelected] = useState([]);
   const [submitted, setSubmitted] = useState(false);
+  const [selectionError, setSelectionError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const [loadingSelection, setLoadingSelection] = useState(false);
   const [ruleWarning, setRuleWarning] = useState("");
   const [showReviewModal, setShowReviewModal] = useState(false);
@@ -14678,30 +14644,33 @@ function SchoolSelection({ schoolsData, studentData }) {
   };
   const err = validate();
   const submitSelection = async () => {
-    setSubmitted(true);
-    if (supabase) {
-      const newSchemaPayload = {
-        student_id: studentData?.id || null,
-        index_number: studentData?.index_number || studentData?.index || null,
+    if (!supabase || !studentData?.id) {
+      setSelectionError("Your school selection cannot be saved without a linked Supabase student account.");
+      return;
+    }
+    setSubmitting(true);
+    setSelectionError("");
+    try {
+      const { error } = await supabase.from("school_selections").insert({
+        student_id: studentData.id,
+        index_number: studentData.index_number || studentData.index || null,
         status: "submitted",
-        selections: selected.map((s, i) => ({
-          rank: i + 1,
-          school_id: s.id,
-          school_name: s.name,
-          region: s.region,
-          category: s.category,
+        selections: selected.map((school, index) => ({
+          rank: index + 1,
+          school_id: school.id,
+          school_name: school.name,
+          region: school.region,
+          category: school.category,
         })),
-      };
-      const { error } = await supabase
-        .from("school_selections")
-        .insert(newSchemaPayload);
-      if (error) {
-        await supabase.from("school_selections").insert({
-          user_email: userEmail,
-          selected_schools: selected,
-          submitted: true,
-        });
-      }
+      });
+      if (error) throw error;
+      setSubmitted(true);
+    } catch (error) {
+      setSelectionError(
+        `Your school selection was not saved: ${error.message || "Supabase request failed."}`,
+      );
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -14711,6 +14680,7 @@ function SchoolSelection({ schoolsData, studentData }) {
         <div className="page-title">Select Schools</div>
         <div className="page-sub">{`Choose ${maxChoices} secondary schools in an approved pattern (${schools.length} schools available: A ${counts.A}, B ${counts.B}, C ${counts.C})${cfg.selectionDeadline ? " — Deadline: " + cfg.selectionDeadline : ""}`}</div>
       </div>
+      {selectionError && <div className="alert alert-warning">{selectionError}</div>}
       {loadingSelection && (
         <div className="alert alert-info">Loading your saved selection...</div>
       )}
@@ -14870,8 +14840,8 @@ function SchoolSelection({ schoolsData, studentData }) {
               >
                 Edit
               </button>
-              <button className="btn btn-blue" onClick={submitSelection}>
-                Submit
+              <button className="btn btn-blue" onClick={submitSelection} disabled={submitting}>
+                {submitting ? "Saving..." : "Submit"}
               </button>
             </div>
           </div>
@@ -20453,6 +20423,7 @@ function StudentStudyContentPage({ user, studentData }) {
   const [quizScore, setQuizScore] = useState(0);
   const [quizPassed, setQuizPassed] = useState(false);
   const [progress, setProgress] = useState({});
+  const [progressError, setProgressError] = useState("");
 
   useEffect(() => {
     loadContent();
@@ -20483,24 +20454,6 @@ function StudentStudyContentPage({ user, studentData }) {
     }
   };
 
-  const getStoredProgressKey = () =>
-    `student_study_progress_${studentData?.id || "anonymous"}`;
-
-  const readStoredProgress = () => {
-    try {
-      const raw = localStorage.getItem(getStoredProgressKey());
-      return raw ? JSON.parse(raw) : {};
-    } catch {
-      return {};
-    }
-  };
-
-  const writeStoredProgress = (progressMap) => {
-    try {
-      localStorage.setItem(getStoredProgressKey(), JSON.stringify(progressMap));
-    } catch {}
-  };
-
   const getProgressKey = (contentId, chapterIndex) => {
     return typeof chapterIndex === 'number' ? `${contentId}:${chapterIndex}` : contentId;
   };
@@ -20524,52 +20477,41 @@ function StudentStudyContentPage({ user, studentData }) {
   };
 
   const saveProgressEntry = async (contentId, chapterIndex, entry) => {
-    const key = getProgressKey(contentId, chapterIndex);
-    const newProgress = {
-      ...progress,
-      [key]: {
-        ...progress[key],
-        ...entry,
-        student_id: studentData?.id,
-        content_id: contentId,
-        chapter_index: typeof chapterIndex === 'number' ? chapterIndex : null,
-        last_accessed_at: new Date().toISOString(),
-      },
-    };
-
-    setProgress(newProgress);
-    writeStoredProgress(newProgress);
-
-    if (!supabase || !studentData?.id) return;
-
-    try {
-      const payload = {
-        student_id: studentData.id,
-        content_id: contentId,
-        progress_percentage: entry.progress_percentage ?? 100,
-        last_accessed_at: new Date().toISOString(),
-      };
-
-      if (typeof chapterIndex === 'number') {
-        payload.chapter_index = chapterIndex;
-      }
-
-      const { error } = await supabase
-        .from('student_study_progress')
-        .upsert(payload, { onConflict: ['student_id', 'content_id', 'chapter_index'] });
-
-      if (error) throw error;
-    } catch (error) {
-      console.warn('Progress saved locally due to Supabase restriction:', error);
+    if (!supabase || !studentData?.id) {
+      setProgressError("Study progress requires a linked Supabase student account.");
+      return;
     }
+
+    const key = getProgressKey(contentId, chapterIndex);
+    const { data, error } = await supabase
+      .from("student_study_progress")
+      .upsert(
+        {
+          student_id: studentData.id,
+          content_id: contentId,
+          chapter_index: typeof chapterIndex === "number" ? chapterIndex : null,
+          progress_percentage: entry.progress_percentage ?? 100,
+          completed: !!entry.completed,
+          completed_at: entry.completed ? new Date().toISOString() : null,
+          last_accessed_at: new Date().toISOString(),
+        },
+        { onConflict: "student_id,content_id,chapter_key" },
+      )
+      .select()
+      .single();
+    if (error) {
+      setProgressError(`Study progress was not saved: ${error.message}`);
+      return;
+    }
+
+    setProgressError("");
+    setProgress((current) => ({ ...current, [key]: data }));
   };
 
   const loadProgress = async () => {
-    if (!studentData?.id) return;
-
-    const storedProgress = readStoredProgress();
-    if (!supabase) {
-      setProgress(storedProgress);
+    if (!supabase || !studentData?.id) {
+      setProgress({});
+      setProgressError("Study progress requires a linked Supabase student account.");
       return;
     }
 
@@ -20582,19 +20524,21 @@ function StudentStudyContentPage({ user, studentData }) {
       if (error) throw error;
 
       const progressMap = {};
-      data.forEach((item) => {
+      (data || []).forEach((item) => {
         const key = typeof item.chapter_index === 'number'
           ? getProgressKey(item.content_id, item.chapter_index)
           : getProgressKey(item.content_id);
         progressMap[key] = item;
       });
 
-      const merged = { ...storedProgress, ...progressMap };
-      setProgress(merged);
-      writeStoredProgress(merged);
+      setProgress(progressMap);
+      setProgressError("");
     } catch (error) {
       console.error('Error loading progress:', error);
-      setProgress(storedProgress);
+      setProgress({});
+      setProgressError(
+        `Study progress could not be loaded: ${error.message || "Supabase request failed."}`,
+      );
     }
   };
 
@@ -20716,7 +20660,7 @@ function StudentStudyContentPage({ user, studentData }) {
 
       const { error } = await supabase
         .from('student_question_attempts')
-        .upsert(attempts, { onConflict: ['student_id', 'question_id'] });
+        .upsert(attempts, { onConflict: 'student_id,question_id' });
 
       if (error) throw error;
     } catch (error) {
@@ -20753,6 +20697,7 @@ function StudentStudyContentPage({ user, studentData }) {
         <div className="page-title">📚 Study Content</div>
         <div className="page-sub">Learn and practice with educational content</div>
       </div>
+      {progressError && <div className="alert alert-warning">{progressError}</div>}
 
       <div className="tests-grid">
         {content.map((item) => {
@@ -25758,340 +25703,206 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
 
 // ROOT
 function GhanaCampus() {
-  const [session, setSession] = useState(() => {
-    const storedSession = readAppSession();
-    if (storedSession?.authSource === "demo") {
-      writeAppSession(null);
-      return null;
-    }
-    return storedSession;
-  });
+  const [session, setSession] = useState(null);
   const [darkMode, setDarkMode] = useState(false);
   const [appSettings, setAppSettings] = useState(DEFAULT_SETTINGS);
 
-  const hydrateSessionFromSupabase = useCallback(async () => {
+  const hydrateSessionFromSupabase = useCallback(async (eventUser) => {
     if (!supabase) {
-      setSession(readAppSession());
+      setSession(null);
+      setDarkMode(false);
+      writeAppSession(null);
       return;
     }
 
-    const { data } = await supabase.auth.getSession();
-    const authUser = data?.session?.user;
+    let authUser = eventUser;
+    if (authUser === undefined) {
+      const { data } = await supabase.auth.getSession();
+      authUser = data?.session?.user;
+    }
 
     if (!authUser) {
-      setSession(readAppSession());
+      setSession(null);
+      setDarkMode(false);
+      writeAppSession(null);
       return;
     }
 
-    let displayName =
-      authUser.user_metadata?.full_name || authUser.email || "User";
-    let role = normalizeRoleKey(authUser.user_metadata?.role || "student");
-
-    let profile = null;
-    if (profilesTableAvailable) {
-      const { data: profileData, error } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", authUser.id)
-        .maybeSingle();
-      if (error && isProfilesTableMissingError(error)) {
-        profilesTableAvailable = false;
-      } else {
-        profile = profileData;
-      }
-
-      if (!profile && authUser.id) {
-        profile = await ensureSupabaseProfile(authUser, role);
-      }
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", authUser.id)
+      .maybeSingle();
+    if (profileError || !profile) {
+      setSession(null);
+      setDarkMode(false);
+      writeAppSession(null);
+      return;
     }
 
-    if (profile?.full_name) displayName = profile.full_name;
-    if (profile?.role) role = normalizeRoleKey(profile.role);
-    const restoredPortal = resolvePortalFromAccount(
-      profile || {
-        role,
-        registered_school_id: authUser.user_metadata?.registered_school_id,
-        managed_school_name: authUser.user_metadata?.managed_school_name,
-      },
-      role,
-    );
+    const { data: preferenceRow, error: preferenceError } = await supabase
+      .from("user_preferences")
+      .select("preferences")
+      .eq("user_id", authUser.id)
+      .maybeSingle();
+    if (preferenceError) {
+      console.error("Could not load account preferences:", preferenceError.message);
+      setDarkMode(false);
+    } else {
+      setDarkMode(!!preferenceRow?.preferences?.dark_mode);
+    }
+
+    const displayName =
+      profile.full_name ||
+      authUser.user_metadata?.full_name ||
+      authUser.email ||
+      authUser.phone ||
+      "User";
+    const role = normalizeRoleKey(profile.role);
+    let studentRecord = null;
+    if (role === "student") {
+      const { data, error: studentError } = await supabase
+        .from("students")
+        .select("id, index_number, index, full_name")
+        .eq("auth_user_id", authUser.id)
+        .maybeSingle();
+      if (studentError || !data) {
+        setSession(null);
+        writeAppSession(null);
+        return;
+      }
+      studentRecord = data;
+    }
+    const restoredPortal = resolvePortalFromAccount(profile, role);
 
     const restoredSession = {
       authSource: "supabase",
       portal: restoredPortal,
       user: {
-        id: authUser.id,
+        id: studentRecord?.id || authUser.id,
+        authUserId: authUser.id,
         email: authUser.email,
         role,
-        name: displayName,
-        registered_school_id:
-          profile?.registered_school_id ??
-          authUser.user_metadata?.registered_school_id ??
-          null,
-        managed_school_name:
-          profile?.managed_school_name ||
-          authUser.user_metadata?.managed_school_name ||
-          "",
+        name: studentRecord?.full_name || displayName,
+        index: studentRecord?.index_number || studentRecord?.index || "",
+        registered_school_id: profile.registered_school_id ?? null,
+        managed_school_name: profile.managed_school_name || "",
       },
     };
     setSession(restoredSession);
     writeAppSession(restoredSession);
   }, []);
 
+  const toggleDarkMode = async () => {
+    if (!supabase || !session?.user?.authUserId) {
+      window.alert("Sign in to save display preferences.");
+      return;
+    }
+
+    const nextDarkMode = !darkMode;
+    setDarkMode(nextDarkMode);
+    const { error } = await supabase.from("user_preferences").upsert(
+      {
+        user_id: session.user.authUserId,
+        preferences: { dark_mode: nextDarkMode },
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id" },
+    );
+    if (error) {
+      setDarkMode(!nextDarkMode);
+      window.alert(`Display preference was not saved: ${error.message}`);
+    }
+  };
+
   const login = async (portal, user, password) => {
-    if (!supabase && portal === "admin") {
+    if (!supabase) {
+      return { ok: false, error: "Supabase is not configured for sign-in." };
+    }
+
+    if (portal === "student") {
+      const studentIndex = String(user.index || "").trim();
+      if (!/^\d{12}$/.test(studentIndex)) {
+        return { ok: false, error: "Enter a valid 12-digit student ID." };
+      }
+
+      const studentEmail =
+        `student-${studentIndex}@students.campusghana.invalid`;
+      const { data: authData, error: authError } =
+        await supabase.auth.signInWithPassword({
+          email: studentEmail,
+          password,
+        });
+      if (authError || !authData?.user) {
+        return { ok: false, error: "Invalid student ID or password." };
+      }
+
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("id, role")
+        .eq("id", authData.user.id)
+        .maybeSingle();
+      if (
+        profileError ||
+        !profile ||
+        normalizeRoleKey(profile.role) !== "student"
+      ) {
+        await supabase.auth.signOut();
+        return {
+          ok: false,
+          error: "This student account has not been provisioned. Contact your school administrator.",
+        };
+      }
+
+      const { data: studentRecord, error: studentError } = await supabase
+        .from("students")
+        .select("id, index_number, index")
+        .eq("auth_user_id", authData.user.id)
+        .maybeSingle();
+      const linkedIndex = String(
+        studentRecord?.index_number || studentRecord?.index || "",
+      );
+      if (
+        studentError ||
+        !studentRecord ||
+        linkedIndex !== studentIndex
+      ) {
+        await supabase.auth.signOut();
+        return {
+          ok: false,
+          error: "This student ID is not linked to the signed-in account. Contact your school administrator.",
+        };
+      }
+
+      await hydrateSessionFromSupabase(authData.user);
+      return { ok: true };
+    }
+
+    const { data: authData, error: authError } =
+      await supabase.auth.signInWithPassword({
+        email: user.email,
+        password,
+      });
+    if (authError || !authData?.user) {
+      return { ok: false, error: authError?.message || "Sign in failed." };
+    }
+
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("id", authData.user.id)
+      .maybeSingle();
+    if (profileError || !profile) {
+      await supabase.auth.signOut();
       return {
         ok: false,
-        error: "Admin sign-in requires Supabase configuration.",
+        error: "This account has no approved portal profile. Ask an administrator to provision its role.",
       };
     }
 
-    if (supabase) {
-      const rawIdentifier = String(user.email || "").trim();
-      const digitsOnly = portal === "student"
-        ? rawIdentifier.replace(/\D/g, "")
-        : rawIdentifier;
-      const identifier =
-        portal === "student" && /^\d{10}$/.test(digitsOnly)
-          ? getStudentIdFromParentContact(digitsOnly, "")
-          : digitsOnly;
+    await hydrateSessionFromSupabase();
+    return { ok: true };
 
-      if (portal === "student" && /^\d{12}$/.test(identifier)) {
-        const indexColumns = [
-          "index_number",
-          "index",
-          "index_no",
-          "bece_index",
-        ];
-        let matchedStudent = null;
-
-        for (const col of indexColumns) {
-          const { data: studentRow, error: studentErr } = await supabase
-            .from("students")
-            .select("*")
-            .eq(col, identifier)
-            .limit(1)
-            .maybeSingle();
-
-          if (studentErr) {
-            if (isMissingColumnError(studentErr)) continue;
-            return {
-              ok: false,
-              error: studentErr.message || "Student validation failed.",
-            };
-          }
-          if (studentRow) {
-            matchedStudent = studentRow;
-            break;
-          }
-        }
-
-        if (!matchedStudent) {
-          const fallbackMatch =
-            identifier.length === 12 && identifier.endsWith("27")
-              ? identifier.slice(0, 10)
-              : null;
-
-          if (fallbackMatch) {
-            const contactVariants = [fallbackMatch];
-            if (fallbackMatch.startsWith("0")) {
-              const noZero = fallbackMatch.slice(1);
-              contactVariants.push(`233${noZero}`);
-              contactVariants.push(`+233${noZero}`);
-            }
-
-            const contactColumns = [
-              "parent_contact",
-              "parent_phone",
-              "guardian_phone",
-              "guardian_contact",
-              "phone",
-              "parent_password",
-            ];
-
-            for (const col of contactColumns) {
-              for (const contactValue of contactVariants) {
-                const { data: studentRow, error: studentErr } = await supabase
-                  .from("students")
-                  .select("*")
-                  .eq(col, contactValue)
-                  .limit(1)
-                  .maybeSingle();
-
-                if (studentErr) {
-                  if (isMissingColumnError(studentErr)) continue;
-                  return {
-                    ok: false,
-                    error: studentErr.message || "Student validation failed.",
-                  };
-                }
-                if (studentRow) {
-                  matchedStudent = studentRow;
-                  break;
-                }
-              }
-              if (matchedStudent) break;
-            }
-          }
-        }
-
-        if (!matchedStudent) {
-          return { ok: false, error: "Student ID not found." };
-        }
-
-        const passwordValue = normalizeParentContactValue(password);
-        const parentContactColumns = [
-          "parent_contact",
-          "parent_phone",
-          "guardian_phone",
-          "guardian_contact",
-          "phone",
-          "parent_password",
-        ];
-        const hasValidParentContact = parentContactColumns.some((col) => {
-          if (matchedStudent[col] == null) return false;
-          return (
-            normalizeParentContactValue(matchedStudent[col]) === passwordValue
-          );
-        });
-
-        if (!hasValidParentContact) {
-          return {
-            ok: false,
-            error: "Parent contact does not match our records.",
-          };
-        }
-
-        const studentName =
-          matchedStudent.full_name || matchedStudent.name || "Student";
-        await supabase.auth.signOut();
-        const studentSession = {
-          authSource: "custom",
-          portal: "student",
-          user: {
-            id: matchedStudent.id || identifier,
-            email: `${identifier}@student.local`,
-            role: "student",
-            name: studentName,
-            index: identifier,
-          },
-        };
-        setSession(studentSession);
-        writeAppSession(studentSession);
-        return { ok: true };
-      }
-
-      // Parent login logic
-      if (portal === "parent") {
-        const { data: parentData, error: parentError } = await supabase
-          .from("parents")
-          .select("*")
-          .eq("email", rawIdentifier)
-          .limit(1)
-          .maybeSingle();
-
-        if (parentError && !isMissingTableError(parentError)) {
-          return { ok: false, error: parentError.message || "Parent authentication failed." };
-        }
-
-        if (!parentData) {
-          return { ok: false, error: "Parent account not found. Please contact the school administration." };
-        }
-
-        // For now, we'll use a simple password check. In production, this should be hashed
-        // TODO: Implement proper password hashing for parents
-        if (String(parentData.password || "") !== String(password || "")) {
-          return { ok: false, error: "Invalid email or password." };
-        }
-
-        await supabase.auth.signOut();
-        const parentSession = {
-          authSource: "custom",
-          portal: "parent",
-          user: {
-            id: parentData.id,
-            email: parentData.email,
-            role: "parent",
-            name: `${parentData.first_name} ${parentData.last_name}`,
-          },
-        };
-        setSession(parentSession);
-        writeAppSession(parentSession);
-        return { ok: true };
-      }
-
-      let authSignInError = null;
-      if (portal !== "student" && portal !== "parent") {
-        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-          email: user.email,
-          password,
-        });
-        if (!authError && authData?.user) {
-          const authUser = authData.user;
-          const roleFromProfile = normalizeRoleKey(portal);
-
-          if (authUser?.id && profilesTableAvailable) {
-            await ensureSupabaseProfile(authUser, roleFromProfile);
-          }
-
-          await hydrateSessionFromSupabase();
-          return { ok: true };
-        }
-        authSignInError = authError;
-        // For admin and school-admin portals, require Supabase auth for content creation permissions
-        if (portal === "admin" || portal === "school-admin") {
-          return { ok: false, error: authSignInError?.message || "Supabase authentication required for this role. Please ensure you have a Supabase account." };
-        }
-      }
-
-      const { data: tableUsers, error: tableUsersError } = await supabase
-        .from("users")
-        .select("*")
-        .eq("email", identifier)
-        .limit(1);
-
-      if (
-        !tableUsersError &&
-        Array.isArray(tableUsers) &&
-        tableUsers.length > 0
-      ) {
-        const matchedUser = tableUsers[0];
-        if (String(matchedUser.password || "") !== String(password || "")) {
-          return { ok: false, error: "Invalid email or password." };
-        }
-
-        const resolvedRole = normalizeRoleKey(matchedUser.role || portal);
-        const resolvedPortal = resolvePortalFromAccount(
-          { ...matchedUser, role: resolvedRole },
-          portal,
-        );
-        await supabase.auth.signOut();
-        const tableSession = {
-          authSource: "custom",
-          portal: resolvedPortal,
-          user: {
-            id: matchedUser.id || user.id,
-            email: matchedUser.email || user.email,
-            role: resolvedRole,
-            name: matchedUser.full_name || user.name,
-            registered_school_id: matchedUser.registered_school_id ?? null,
-            managed_school_name: matchedUser.managed_school_name || "",
-          },
-        };
-        setSession(tableSession);
-        writeAppSession(tableSession);
-        return { ok: true };
-      }
-
-      if (portal !== "student" && portal !== "parent" && authSignInError) {
-        return { ok: false, error: authSignInError.message || "Invalid email or password." };
-      }
-
-      const s = { authSource: "custom", portal, user };
-      setSession(s);
-      writeAppSession(s);
-      return { ok: true };
-    }
   };
 
 
@@ -26151,8 +25962,10 @@ function GhanaCampus() {
     if (!supabase) return;
 
     hydrateSessionFromSupabase();
-    const { data: listener } = supabase.auth.onAuthStateChange(() => {
-      hydrateSessionFromSupabase();
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, authSession) => {
+      queueMicrotask(() => {
+        hydrateSessionFromSupabase(authSession?.user || null);
+      });
     });
 
     return () => {
@@ -26174,28 +25987,28 @@ function GhanaCampus() {
           user={session.user}
           onLogout={logout}
           darkMode={darkMode}
-          onToggleDark={() => setDarkMode((d) => !d)}
+          onToggleDark={toggleDarkMode}
         />
       ) : session.portal === "school-admin" ? (
         <SchoolAdminPortal
           user={session.user}
           onLogout={logout}
           darkMode={darkMode}
-          onToggleDark={() => setDarkMode((d) => !d)}
+          onToggleDark={toggleDarkMode}
         />
       ) : session.portal === "parent" ? (
         <ParentPortal
           user={session.user}
           onLogout={logout}
           darkMode={darkMode}
-          onToggleDark={() => setDarkMode((d) => !d)}
+          onToggleDark={toggleDarkMode}
         />
       ) : (
         <StudentPortal
           user={session.user}
           onLogout={logout}
           darkMode={darkMode}
-          onToggleDark={() => setDarkMode((d) => !d)}
+          onToggleDark={toggleDarkMode}
         />
       )}
     </SettingsContext.Provider>

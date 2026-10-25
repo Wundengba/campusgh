@@ -6,6 +6,7 @@ export function Landing({ onSelect }) {
   const [mode, setMode] = useState(null);
   const [email, setEmail] = useState("");
   const [pwd, setPwd] = useState("");
+  const [studentIndex, setStudentIndex] = useState("");
   const [err, setErr] = useState("");
   const [showPwd, setShowPwd] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -51,27 +52,30 @@ export function Landing({ onSelect }) {
   };
 
   const handle = async () => {
-    if (!email || !pwd) {
+    if (mode === "student") {
+      if (!/^\d{12}$/.test(studentIndex)) {
+        setErr("Enter your 12-digit student ID.");
+        return;
+      }
+      if (!pwd) {
+        setErr("Enter your password.");
+        return;
+      }
+    } else if (!email || !pwd) {
       setErr("Please fill in both fields.");
       return;
-    }
-    if (mode === "student") {
-      if (!/^\d{10}$/.test(email) && !/^\d{12}$/.test(email)) {
-        setErr(
-          "Enter a 10-digit parent contact or the 12-digit generated student ID.",
-        );
-        return;
-      }
-      if (!/^\d{10}$/.test(pwd)) {
-        setErr("Parent contact must be exactly 10 digits.");
-        return;
-      }
     }
     setErr("");
     setLoading(true);
     try {
+      if (mode === "student") {
+        const result = await onSelect(mode, { index: studentIndex }, pwd);
+        if (!result?.ok) setErr(result?.error || "Student sign in failed.");
+        return;
+      }
+
       const payloadUser = {
-        name: mode === "admin" ? "Admin User" : "Student User",
+        name: "Admin User",
         role: mode,
         email,
       };
@@ -100,48 +104,46 @@ export function Landing({ onSelect }) {
           <div className="landing-title">Sign In</div>
           <div className="landing-sub">{mode === "admin" ? "Admin Portal" : "Student Portal"}</div>
           <div className="login-form">
-            <button className="login-back" onClick={() => { setMode(null); setErr(""); }}><Ico name="back" size={16} color="#1a56db" /> Back</button>
+            <button className="login-back" onClick={() => { setMode(null); setErr(""); setPwd(""); }}><Ico name="back" size={16} color="#1a56db" /> Back</button>
             {err && <div className="alert alert-danger">{err}</div>}
+            {mode === "student" ? (
+              <div className="auth-input-wrap">
+                <span className="auth-input-icon"><Ico name="profile" size={18} color="#64748b" /></span>
+                <input
+                  className="form-input"
+                  placeholder="Student ID"
+                  value={studentIndex}
+                  onChange={(e) => setStudentIndex(e.target.value.replace(/\D/g, "").slice(0, 12))}
+                  maxLength={12}
+                  inputMode="numeric"
+                  autoComplete="username"
+                />
+              </div>
+            ) : (
             <div className="auth-input-wrap">
               <span className="auth-input-icon"><Ico name="email" size={18} color="#64748b" /></span>
               <input
                 className="form-input"
-                placeholder={
-                  mode === "admin"
-                    ? "admin@campus.edu"
-                    : "Student ID or guardian phone"
-                }
+                placeholder="Staff email"
                 value={email}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  if (mode === "student") {
-                    setEmail(value.replace(/\D/g, "").slice(0, 12));
-                  } else {
-                    setEmail(value);
-                  }
-                }}
-                maxLength={mode === "student" ? 12 : 254}
-                inputMode={mode === "student" ? "numeric" : "email"}
+                onChange={(e) => setEmail(e.target.value)}
+                maxLength={254}
+                inputMode="email"
               />
             </div>
+            )}
             <div className="auth-input-wrap">
               <span className="auth-input-icon"><Ico name="lock" size={18} color="#64748b" /></span>
               <input
                 className="form-input"
                 type={showPwd ? "text" : "password"}
                 data-has-toggle="true"
-                placeholder={mode === "admin" ? "Password" : "Parent contact"}
+                placeholder={mode === "student" ? "Parent/guardian contact" : "Password"}
                 value={pwd}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  if (mode === "student") {
-                    setPwd(value.replace(/\D/g, "").slice(0, 10));
-                  } else {
-                    setPwd(value);
-                  }
-                }}
-                maxLength={mode === "student" ? 10 : 128}
-                inputMode={mode === "student" ? "numeric" : "text"}
+                onChange={(e) => setPwd(e.target.value)}
+                maxLength={128}
+                inputMode="text"
+                autoComplete="current-password"
               />
               <button
                 type="button"
@@ -153,7 +155,7 @@ export function Landing({ onSelect }) {
                 <Ico name={showPwd ? "eyeOff" : "eye"} size={18} color="#64748b" />
               </button>
             </div>
-            <button className="btn-primary" onClick={handle} disabled={loading}><Ico name="signin" size={18} color="#fff" />{loading ? "Signing In..." : "Sign In"}</button>
+            <button className="btn-primary" onClick={handle} disabled={loading}><Ico name="signin" size={18} color="#fff" />{loading ? "Please wait..." : "Sign In"}</button>
           </div>
         </div>
       </div>
@@ -193,7 +195,7 @@ export function Landing({ onSelect }) {
           <button className="portal-btn" onClick={() => setMode("student")}>
             <div className="portal-btn-icon"><Ico name="profile" size={24} color="#7c3aed" /></div>
             <div className="portal-btn-label">Student</div>
-            <div className="portal-btn-sub">Students & parents</div>
+            <div className="portal-btn-sub">Student account</div>
           </button>
         </div>
       </div>

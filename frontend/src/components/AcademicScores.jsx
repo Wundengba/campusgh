@@ -98,38 +98,41 @@ export default function AcademicScores() {
     });
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!supabase) return alert("Supabase not configured");
     setSaving(true);
     setError("");
-    // Flatten scores for upsert
-    const rows = [];
-    scores.forEach(student => {
-      SUBJECTS.forEach(subject => {
-        const score = student.scores[subject];
-        if (score !== "" && !isNaN(Number(score))) {
-          rows.push({
-            student_id: student.student_id,
-            index_number: student.index,
-            subject,
-            score: Number(score),
-            exam_type: "test",
-          });
-        }
+    try {
+      const rows = [];
+      scores.forEach((student) => {
+        SUBJECTS.forEach((subject) => {
+          const score = student.scores[subject];
+          if (score !== "" && !isNaN(Number(score))) {
+            rows.push({
+              student_id: student.student_id,
+              index_number: student.index,
+              subject,
+              score: Number(score),
+              exam_type: "test",
+            });
+          }
+        });
       });
-    });
-    const upsertScores = async () => {
-      try {
-        const { error } = await supabase.from("scores").upsert(rows, { onConflict: ["student_id", "subject", "exam_type"] });
-        if (error) throw error;
-        alert("Scores saved!");
-      } catch (err) {
-        setError("Failed to save scores to Supabase.");
-      } finally {
-        setSaving(false);
+      if (!rows.length) {
+        setError("Enter at least one score before saving.");
+        return;
       }
-    };
-    upsertScores();
+
+      const { error } = await supabase
+        .from("scores")
+        .upsert(rows, { onConflict: "student_id,subject,exam_type" });
+      if (error) throw error;
+      alert("Scores saved!");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save scores to Supabase.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (

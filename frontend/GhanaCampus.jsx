@@ -1,13 +1,24 @@
-import { useState, useEffect, useCallback, useContext, useMemo, useRef } from "react";
+import { lazy, Suspense, useState, useEffect, useCallback, useContext, useMemo, useRef } from "react";
 import { supabase } from "./src/lib/supabaseClient.js";
 import { Ico } from "./src/components/Ico.jsx";
-import { Landing } from "./src/components/Landing.jsx";
 import { Topbar } from "./src/components/Topbar.jsx";
 import { SettingsContext } from "./src/context/SettingsContext.js";
 import { useIsMobileLayout } from "./src/hooks/useIsMobileLayout.js";
 import { useStudentPortalRecords } from "./src/hooks/useStudentPortalRecords.js";
-import AcademicScores from "./src/components/AcademicScores.jsx";
-import { DEFAULT_SETTINGS, getGrade } from "./src/config/campusConfig.js";
+import {
+  DEFAULT_SETTINGS,
+  calculateSubjectAggregate,
+  getGrade,
+  getStudentNavVisibility,
+} from "./src/config/campusConfig.js";
+import {
+  getLearningLevelName,
+  getLearningResourceLabel,
+  isLearningLevel,
+  LEARNING_LEVELS,
+  LEARNING_RESOURCE_TYPES,
+  LEARNING_SUBJECTS,
+} from "./src/config/learningCatalog.js";
 import {
   ANNOUNCEMENTS,
   ATTENDANCE_DATA,
@@ -53,6 +64,13 @@ import {
 } from "./src/utils/sessionState.js";
 
 import { NotificationContext } from "./src/components/NotificationSystem.jsx";
+
+const Landing = lazy(() =>
+  import("./src/components/Landing.jsx").then((module) => ({
+    default: module.Landing,
+  })),
+);
+const AcademicScores = lazy(() => import("./src/components/AcademicScores.jsx"));
 
 // List of tables to subscribe for realtime notifications
 const REALTIME_TABLES = [
@@ -236,16 +254,43 @@ const css = `
   .app { display:flex; flex-direction:column; min-height:100vh; }
 
   /* LANDING */
-  .landing { min-height:100vh; display:flex; align-items:center; justify-content:center;
-    background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 50%, #1a56db 100%); padding:20px; }
-  .landing-box { background:#fff; border-radius:24px; padding:30px 28px; max-width:420px; width:100%;
-    box-shadow:0 24px 80px rgba(0,0,0,.3); text-align:center; }
-  .landing .brand-btn { width:100%; margin:0 auto; }
-  .landing-logo { width:66px; height:66px; border-radius:16px; margin:0 auto 14px; overflow:hidden; }
-  .landing-logo img { width:100%; height:100%; object-fit:cover; }
-  .landing-title { font-size:1.75rem; font-weight:800; color:#0f172a; margin-bottom:4px; }
-  .landing-sub { color:#64748b; margin-bottom:20px; font-size:.92rem; }
-  .landing-install-wrap { display:grid; gap:8px; margin:0 0 16px; }
+  .landing { min-height:100vh; min-height:100svh; display:flex; align-items:center; justify-content:center;
+    position:relative; overflow:hidden; isolation:isolate; padding:28px 20px; perspective:1200px;
+    background:
+        radial-gradient(circle at 8% 12%, rgba(146,184,255,.68) 0 88px, rgba(255,255,255,.88) 90px 96px, rgba(191,211,255,.52) 100px, transparent 112px),
+        radial-gradient(circle at 98% 34%, rgba(182,204,255,.52) 0 48px, rgba(255,255,255,.9) 50px 55px, rgba(201,216,255,.48) 59px, transparent 69px),
+        radial-gradient(circle at 4% 91%, rgba(153,190,255,.58) 0 88px, rgba(255,255,255,.88) 90px 96px, rgba(191,211,255,.5) 100px, transparent 112px),
+      linear-gradient(145deg,#edf2ff 0%,#e4ebff 48%,#f5f6ff 100%); }
+  .landing::before, .landing::after { content:""; position:absolute; z-index:-1; width:180px; height:180px; border-radius:50%;
+    background:radial-gradient(circle at 32% 26%,#fff 0%,rgba(255,255,255,.78) 12%,rgba(211,226,255,.54) 54%,rgba(161,189,249,.3) 68%,rgba(255,255,255,.78) 73%,rgba(194,212,255,.22) 80%,transparent 83%);
+    box-shadow:inset 8px 8px 18px rgba(255,255,255,.72),inset -8px -10px 24px rgba(108,142,211,.12),0 20px 42px rgba(108,142,211,.13);
+    animation:landing-orb-float 9s ease-in-out infinite alternate; }
+  .landing::before { top:13%; right:-118px; }
+  .landing::after { bottom:7%; left:-126px; animation-delay:-4s; }
+  .landing-box { position:relative; width:100%; max-width:420px; padding:27px 24px 21px; text-align:center;
+    border:1px solid rgba(255,255,255,.7); border-radius:30px;
+    background:linear-gradient(145deg,rgba(255,255,255,.42),rgba(240,244,255,.2));
+    box-shadow:14px 18px 38px rgba(86,111,168,.12),-10px -10px 28px rgba(255,255,255,.6),inset 1px 1px 0 rgba(255,255,255,.82);
+    transform:rotateX(1deg); transform-style:preserve-3d; backdrop-filter:blur(7px); }
+  .landing .brand-mark { width:100%; margin:0 auto; display:flex; align-items:center; justify-content:center; }
+  .landing-logo { width:112px; height:112px; border-radius:50%; margin:0 auto 14px; padding:8px; overflow:hidden;
+    background:linear-gradient(145deg,rgba(255,255,255,.98),rgba(225,234,255,.85)); border:1px solid rgba(255,255,255,.98);
+    box-shadow:8px 10px 23px rgba(73,107,178,.2),-6px -6px 16px rgba(255,255,255,.88),inset 1px 1px 4px rgba(255,255,255,.95);
+    transform:translateZ(28px); }
+  .landing-logo img { width:100%; height:100%; object-fit:contain; border-radius:50%; transform:scale(1.28); }
+  .landing-title { font-size:1.75rem; font-weight:800; color:#15213d; margin-bottom:4px; letter-spacing:-.035em; transform:translateZ(18px); text-shadow:0 1px 0 rgba(255,255,255,.8); }
+  .landing-sub { color:#66738e; margin-bottom:20px; font-size:.82rem; line-height:1.45; }
+  .login-portal-switch { display:flex; gap:5px; padding:4px; margin:0 2px 14px; border-radius:18px;
+    background:linear-gradient(145deg,rgba(209,220,246,.56),rgba(255,255,255,.66)); border:1px solid rgba(255,255,255,.86);
+    box-shadow:inset 3px 3px 8px rgba(94,117,166,.1),inset -3px -3px 8px rgba(255,255,255,.88),0 5px 12px rgba(93,117,169,.08);
+    transform:translateZ(12px); }
+  .login-portal-option { flex:1; min-height:38px; display:flex; align-items:center; justify-content:center; gap:7px;
+    border:0; border-radius:14px; background:transparent; color:#65728c; cursor:pointer; font-size:.78rem; font-weight:700;
+    transition:background .18s ease,color .18s ease,box-shadow .18s ease; }
+  .login-portal-option.active { background:linear-gradient(145deg,#fff,#edf3ff); color:#2251ba; box-shadow:3px 4px 9px rgba(80,109,173,.16),-2px -2px 5px rgba(255,255,255,.95); }
+  .login-portal-option:focus-visible, .landing .btn-primary:focus-visible, .auth-pwd-toggle:focus-visible {
+    outline:3px solid rgba(37,99,235,.35); outline-offset:2px; }
+  .landing-install-wrap { display:grid; gap:8px; margin:0 0 16px; transform:translateZ(18px); }
   .landing-install-btn {
     width:100%; border:none; border-radius:16px; padding:14px 16px; cursor:pointer;
     display:flex; align-items:center; gap:12px; text-align:left;
@@ -287,6 +332,32 @@ const css = `
   .auth-pwd-toggle { position:absolute; right:10px; border:none; background:transparent; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:4px; }
   .form-input { width:100%; padding:10px 12px; border:2px solid #e2e8f0; border-radius:10px;
     font-family:var(--font); font-size:.95rem; outline:none; transition:border-color .2s; }
+  .landing .auth-input-wrap { min-height:54px; }
+  .landing .form-input { height:54px; padding-top:0; padding-bottom:0; border:1px solid rgba(255,255,255,.95);
+    border-radius:17px; background:linear-gradient(145deg,rgba(240,244,255,.9),rgba(255,255,255,.84)); color:#26344f; font-size:.78rem;
+    box-shadow:inset 4px 4px 9px rgba(83,107,157,.12),inset -4px -4px 9px rgba(255,255,255,.98),0 4px 8px rgba(83,111,173,.06); }
+  .landing .form-input::placeholder { color:#7b879e; opacity:1; }
+  .landing .form-input:focus { border-color:#84b7ff; background:linear-gradient(145deg,#fff,#f7f9ff); box-shadow:0 0 0 3px rgba(59,130,246,.13),inset 2px 2px 5px rgba(83,107,157,.07),0 7px 15px rgba(83,111,173,.12); }
+  .landing .auth-input-icon { left:12px; }
+  .landing .auth-pwd-toggle { right:10px; }
+  .login-help-row { display:flex; justify-content:space-between; gap:10px; color:#6f7d97; font-size:.66rem; line-height:1.35; text-align:left; }
+  .login-help-row span:last-child { text-align:right; }
+  .landing .btn-primary { min-height:54px; padding:0 18px; border-radius:24px;
+    background:linear-gradient(100deg,#24b4ff 0%,#2560f2 54%,#6139f3 100%);
+    border:1px solid rgba(255,255,255,.44); box-shadow:0 8px 0 rgba(42,65,194,.16),0 14px 22px rgba(49,86,227,.3),inset 0 2px 2px rgba(255,255,255,.42);
+    justify-content:space-between; font-size:.9rem; transform:translateZ(22px); transition:transform .18s ease,box-shadow .18s ease,opacity .18s ease; }
+  .landing .btn-primary:hover { opacity:1; box-shadow:0 10px 0 rgba(42,65,194,.14),0 18px 27px rgba(49,86,227,.36),inset 0 2px 2px rgba(255,255,255,.48); transform:translateY(-2px) translateZ(22px); }
+  .landing .btn-primary:active { box-shadow:0 2px 0 rgba(42,65,194,.18),0 5px 10px rgba(49,86,227,.2),inset 0 2px 4px rgba(22,39,130,.18); transform:translateY(4px) translateZ(14px); }
+  .landing .btn-primary:disabled { cursor:wait; opacity:.72; }
+  .login-submit-arrow { width:27px; height:27px; display:flex; align-items:center; justify-content:center;
+    border-radius:50%; background:rgba(255,255,255,.18); font-size:1.15rem; line-height:1; }
+  .landing-footer { margin-top:28px; color:#75829b; font-size:.56rem; font-weight:700; letter-spacing:.2em; transform:translateZ(12px); }
+  .landing-footer span { margin:0 5px; color:#3969d7; }
+  @keyframes landing-orb-float { from { transform:translate3d(0,0,0) rotate(-5deg); } to { transform:translate3d(0,-12px,0) rotate(4deg); } }
+  @media (prefers-reduced-motion:reduce) {
+    .landing::before,.landing::after { animation:none; }
+    .landing .btn-primary,.login-portal-option { transition:none; }
+  }
   .auth-input-wrap .form-input { padding-left:40px; }
   .auth-input-wrap .form-input[type="password"], .auth-input-wrap .form-input[data-has-toggle="true"] { padding-right:40px; }
   .form-input:focus { border-color:var(--primary); }
@@ -1956,7 +2027,7 @@ const css = `
     .modal-actions { flex-wrap:wrap; }
     .modal-actions .btn { flex:1; justify-content:center; }
 
-    .landing-box { padding:22px 18px; border-radius:18px; }
+    .landing-box { padding:22px 18px; border-radius:28px; }
     .landing-title { font-size:1.45rem; }
     .landing-install-btn { padding:13px 14px; }
     .portal-btn { padding:13px 10px; }
@@ -2049,9 +2120,9 @@ const css = `
     .page-actions-row .form-control,
     .page-actions-row .btn { width:100%; flex-basis:100%; }
 
-    .landing-box { padding:18px 14px; }
-    .landing-title { font-size:1.25rem; }
-    .landing-logo { width:54px; height:54px; }
+    .landing-box { padding:22px 14px; border-radius:26px; }
+    .landing-title { font-size:1.55rem; }
+    .landing-logo { width:112px; height:112px; }
     .landing-install-btn { padding:12px 13px; gap:10px; }
     .landing-install-icon { width:36px; height:36px; }
 
@@ -2215,6 +2286,19 @@ const css = `
   .test-actions { display:flex; gap:10px; }
   .test-actions button { flex:1; border-radius:14px; }
   .mapped-badge { display:inline-flex; align-items:center; gap:8px; padding:10px 14px; border-radius:999px; background:#eff6ff; color:#075985; font-weight:600; font-size:.86rem; margin-bottom:12px; border:1px solid rgba(14,165,233,.18); }
+
+  .learning-hub-level-picker { padding:22px; margin-bottom:20px; border:1px solid var(--border); border-radius:20px; background:var(--surface); color:var(--text); }
+  .learning-hub-level-heading h2 { margin:0 0 5px; font-size:1.05rem; }
+  .learning-hub-level-heading p { margin:0; color:var(--text2); font-size:.9rem; }
+  .learning-hub-filters { display:grid; grid-template-columns:repeat(2,minmax(180px,1fr)); gap:14px; max-width:620px; margin:20px 0; }
+  .learning-hub-filters label { display:grid; gap:6px; color:var(--text2); font-size:.85rem; font-weight:600; }
+  .learning-dashboard-cta { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+  .learning-dashboard-cta h3 { margin:0 0 6px; }
+  .learning-dashboard-cta p { margin:0; color:var(--text2); line-height:1.5; }
+  @media (max-width:640px) {
+    .learning-hub-filters { grid-template-columns:1fr; }
+    .learning-dashboard-cta { align-items:flex-start; flex-direction:column; }
+  }
 
   .study-content-page .page-header { background:linear-gradient(135deg,#1e293b 0%,#334155 50%,#475569 100%); border-radius:24px; padding:28px 32px; margin-bottom:28px; color:#fff; box-shadow:0 24px 60px rgba(30,41,59,.15); }
   .study-content-page .page-header .page-title { font-size:2rem; margin-bottom:8px; }
@@ -2894,7 +2978,272 @@ const css = `
     font-size: 24px;
   }
 }
+
+/* Shared soft-blue workspace theme */
+.app {
+  background:
+    radial-gradient(circle at 100% 0%, rgba(201,219,255,.34), transparent 30rem),
+    radial-gradient(circle at 0% 50%, rgba(224,235,255,.42), transparent 32rem),
+    linear-gradient(145deg,#f4f7ff 0%,#edf2ff 55%,#f8f9ff 100%);
+  background-attachment:fixed;
+}
+.app .topbar {
+  background:rgba(248,250,255,.88);
+  border-bottom:1px solid rgba(208,220,244,.76);
+  box-shadow:0 6px 24px rgba(67,94,153,.08);
+  backdrop-filter:blur(18px);
+  -webkit-backdrop-filter:blur(18px);
+}
+.app .menu-btn,
+.app .topbar-btn { color:#38598e; }
+.app .menu-btn svg,
+.app .topbar-btn svg { color:#38598e !important; }
+.app .topbar-actions {
+  background:rgba(226,235,252,.68);
+  border-color:rgba(202,216,242,.85);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.85);
+}
+.app .topbar-actions .topbar-btn + .topbar-btn { box-shadow:-1px 0 0 rgba(157,178,216,.3); }
+.app .topbar-btn:hover { background:rgba(197,215,250,.62); }
+.app .topbar-app-logo {
+  border-color:rgba(171,193,232,.55);
+  box-shadow:0 3px 8px rgba(58,91,157,.12);
+}
+.app .sidebar {
+  background:rgba(249,251,255,.88);
+  border-right-color:rgba(208,220,244,.82);
+  box-shadow:8px 0 30px rgba(75,101,157,.035);
+  backdrop-filter:blur(16px);
+  -webkit-backdrop-filter:blur(16px);
+}
+.app .sidebar-brand { border-bottom-color:rgba(208,220,244,.7); }
+.app .sidebar-brand img {
+  border-color:rgba(255,255,255,.92);
+  border-radius:20px;
+  box-shadow:0 8px 22px rgba(73,107,178,.15);
+}
+.app .sidebar-section { color:#8494b2; letter-spacing:.11em; }
+.app .nav-item { border-radius:14px; }
+.app .nav-item:hover { background:rgba(223,234,255,.74); }
+.app .nav-item.active {
+  background:linear-gradient(115deg,rgba(226,237,255,.98),rgba(240,245,255,.88));
+  box-shadow:inset 0 0 0 1px rgba(162,190,240,.42),0 5px 14px rgba(80,113,179,.07);
+}
+.app .main { background:transparent; }
+.app .card,
+.app .stat-card:not(.dashboard-stat-card),
+.app .student-profile-card,
+.app .mobile-record-card,
+.app .results-panel,
+.app .selection-card {
+  background:rgba(255,255,255,.88);
+  border-color:rgba(212,223,243,.86);
+  border-radius:18px;
+  box-shadow:0 10px 28px rgba(70,98,157,.065),inset 0 1px 0 rgba(255,255,255,.92);
+}
+.app .card-padded { padding:22px; }
+.app .page-header {
+  background:linear-gradient(135deg,rgba(255,255,255,.94),rgba(233,241,255,.9));
+  border:1px solid rgba(211,224,247,.82);
+  border-radius:22px;
+  color:#182947;
+  box-shadow:0 12px 28px rgba(69,99,160,.075);
+}
+.app .page-title { color:#182947; }
+.app .page-sub { color:#71809a; }
+.app .form-control,
+.app .form-input,
+.app select,
+.app textarea {
+  border-color:rgba(204,217,240,.95);
+  border-radius:12px;
+  background:rgba(255,255,255,.82);
+  color:#263752;
+  box-shadow:inset 0 1px 2px rgba(79,106,158,.035);
+  transition:border-color .18s ease,box-shadow .18s ease,background .18s ease;
+}
+.app .form-control:focus,
+.app .form-input:focus,
+.app select:focus,
+.app textarea:focus {
+  border-color:#8bb5f7;
+  outline:none;
+  background:#fff;
+  box-shadow:0 0 0 3px rgba(78,133,224,.13),0 4px 12px rgba(75,110,175,.06);
+}
+.app .btn { border-radius:12px; transition:transform .16s ease,box-shadow .16s ease,background .16s ease; }
+.app .btn-blue {
+  background:linear-gradient(105deg,#26a5ee 0%,#3265ed 58%,#5848e8 100%);
+  box-shadow:0 6px 16px rgba(49,101,220,.18);
+}
+.app .btn-blue:hover { background:linear-gradient(105deg,#168ed8,#2856dc 58%,#4939d2); transform:translateY(-1px); }
+.app .btn-outline { background:rgba(255,255,255,.8); border-radius:12px; }
+.app .table-wrap {
+  border:1px solid rgba(211,223,243,.8);
+  background:rgba(255,255,255,.82);
+  box-shadow:0 8px 24px rgba(70,98,157,.045);
+}
+.app th { background:linear-gradient(180deg,#f5f8ff,#ebf1ff); color:#536684; }
+.app tr:hover td { background:rgba(235,242,255,.62); }
+.app .modal-card {
+  border:1px solid rgba(214,225,244,.9);
+  background:rgba(250,252,255,.97);
+  box-shadow:0 24px 70px rgba(44,66,111,.2);
+  backdrop-filter:blur(16px);
+}
+.app .bottom-nav {
+  border-top:1px solid rgba(210,222,244,.85);
+  background:rgba(248,250,255,.92);
+  box-shadow:0 -8px 24px rgba(73,99,153,.06);
+  backdrop-filter:blur(16px);
+  -webkit-backdrop-filter:blur(16px);
+}
+.app .bottom-nav-item { border-radius:14px; }
+.app .bottom-nav-item:hover { background:rgba(226,237,255,.68); }
+.app .bottom-nav-item.active {
+  color:#315fc0;
+  background:linear-gradient(135deg,#e6efff,#f4f7ff);
+  box-shadow:inset 0 0 0 1px rgba(176,199,239,.5);
+}
+body.dark-mode .app {
+  background:
+    radial-gradient(circle at 100% 0%,rgba(36,69,126,.23),transparent 30rem),
+    radial-gradient(circle at 0% 50%,rgba(25,49,92,.2),transparent 32rem),
+    linear-gradient(145deg,#0b1220,#101a2d 58%,#0d1628);
+}
+body.dark-mode .app .topbar {
+  background:rgba(13,22,39,.9);
+  border-bottom-color:rgba(76,101,145,.35);
+}
+body.dark-mode .app .menu-btn,
+body.dark-mode .app .topbar-btn,
+body.dark-mode .app .menu-btn svg,
+body.dark-mode .app .topbar-btn svg { color:#d5e3ff !important; }
+body.dark-mode .app .topbar-actions {
+  background:rgba(40,58,91,.58);
+  border-color:rgba(111,139,186,.3);
+}
+body.dark-mode .app .topbar-actions .topbar-btn + .topbar-btn { box-shadow:-1px 0 0 rgba(148,174,218,.15); }
+body.dark-mode .app .sidebar {
+  background:rgba(14,24,42,.94);
+  border-right-color:rgba(76,101,145,.35);
+}
+body.dark-mode .app .sidebar-brand { border-bottom-color:rgba(76,101,145,.32); }
+body.dark-mode .app .sidebar-section { color:#8295b7; }
+body.dark-mode .app .nav-item:hover { background:rgba(42,64,103,.48); }
+body.dark-mode .app .nav-item.active {
+  background:linear-gradient(115deg,rgba(36,70,130,.72),rgba(30,53,96,.82));
+  box-shadow:inset 0 0 0 1px rgba(105,149,223,.3);
+}
+body.dark-mode .app .card,
+body.dark-mode .app .stat-card:not(.dashboard-stat-card),
+body.dark-mode .app .student-profile-card,
+body.dark-mode .app .mobile-record-card,
+body.dark-mode .app .results-panel,
+body.dark-mode .app .selection-card {
+  background:rgba(17,29,50,.92);
+  border-color:rgba(66,89,130,.48);
+  box-shadow:0 12px 30px rgba(0,0,0,.14),inset 0 1px 0 rgba(255,255,255,.025);
+}
+body.dark-mode .app .page-header {
+  background:linear-gradient(135deg,rgba(21,37,64,.96),rgba(23,43,78,.9));
+  border-color:rgba(76,101,145,.4);
+  color:#e4edff;
+}
+body.dark-mode .app .page-title { color:#e4edff; }
+body.dark-mode .app .page-sub { color:#aabbd8; }
+body.dark-mode .app .form-control,
+body.dark-mode .app .form-input,
+body.dark-mode .app select,
+body.dark-mode .app textarea {
+  background:rgba(12,21,37,.9);
+  border-color:rgba(74,98,140,.55);
+  color:#e2eaff;
+}
+body.dark-mode .app .form-control:focus,
+body.dark-mode .app .form-input:focus,
+body.dark-mode .app select:focus,
+body.dark-mode .app textarea:focus {
+  border-color:#70a3f4;
+  background:#101d33;
+  box-shadow:0 0 0 3px rgba(78,133,224,.16);
+}
+body.dark-mode .app .table-wrap {
+  background:rgba(15,26,45,.88);
+  border-color:rgba(66,89,130,.44);
+}
+body.dark-mode .app th { background:linear-gradient(180deg,#172944,#14233b); color:#c0d2f2; }
+body.dark-mode .app tr:hover td { background:rgba(29,48,78,.5); }
+body.dark-mode .app .modal-card {
+  background:rgba(15,26,45,.97);
+  border-color:rgba(76,101,145,.48);
+}
+body.dark-mode .app .bottom-nav {
+  background:rgba(13,22,39,.94);
+  border-top-color:rgba(76,101,145,.36);
+}
+body.dark-mode .app .bottom-nav-item:hover { background:rgba(42,64,103,.48); }
+body.dark-mode .app .bottom-nav-item.active {
+  color:#c4d8ff;
+  background:linear-gradient(135deg,rgba(36,70,130,.52),rgba(30,53,96,.62));
+  box-shadow:inset 0 0 0 1px rgba(105,149,223,.24);
+}
 `;
+
+function DashboardDateTime() {
+  const { cfg } = useContext(SettingsContext);
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const intervalId = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  let day = "—";
+  let date = "—";
+  let time = "—";
+  try {
+    const locale = cfg.locale || "en-GH";
+    const timeZone = cfg.timezone || "Africa/Accra";
+    day = new Intl.DateTimeFormat(locale, {
+      timeZone,
+      weekday: "long",
+    }).format(now);
+    date = new Intl.DateTimeFormat(locale, {
+      timeZone,
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    }).format(now);
+    time = new Intl.DateTimeFormat(locale, {
+      timeZone,
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }).format(now);
+  } catch (error) {
+    console.error("Could not format dashboard date and time:", error);
+    day = date = time = "Check date and time settings";
+  }
+
+  return (
+    <div
+      aria-label="Current date and time"
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        gap: "6px 14px",
+        marginTop: 8,
+        color: "#64748b",
+        fontSize: ".85rem",
+        fontWeight: 600,
+      }}
+    >
+      <span>{day}</span>
+      <span>{date}</span>
+      <time>{time}</time>
+    </div>
+  );
+}
 
 // DASHBOARD (Admin)
 function AdminDashboard({
@@ -2927,6 +3276,7 @@ function AdminDashboard({
           Academic Year {cfg.academicYear} &mdash; {cfg.currentTerm} &mdash;
           Welcome back! Here's what's happening today.
         </div>
+        <DashboardDateTime />
       </div>
       <div className="stats-grid">
         {[
@@ -3684,6 +4034,7 @@ function StudentsPage({
   const [bulkSchoolId, setBulkSchoolId] = useState("");
   const [bulkStatus, setBulkStatus] = useState("");
   const [applyingBulk, setApplyingBulk] = useState(false);
+  const [provisioningLogins, setProvisioningLogins] = useState(false);
   const [selectedFilterSchoolId, setSelectedFilterSchoolId] = useState("");
   const [selectedFilterClassId, setSelectedFilterClassId] = useState("");
   const [statusModal, setStatusModal] = useState({
@@ -3939,6 +4290,72 @@ function StudentsPage({
     }
   };
 
+  const provisionSelectedStudentLogins = async (studentIdsToProvision = selectedStudentIds) => {
+    const selectedIds = studentIdsToProvision.filter((id) =>
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id),
+    );
+    if (!selectedIds.length) {
+      setStatusModal({
+        open: true,
+        type: "failure",
+        title: "Login Setup Failed",
+        message: "Select registered student records with valid database IDs.",
+      });
+      return;
+    }
+    if (!supabase) {
+      setStatusModal({
+        open: true,
+        type: "failure",
+        title: "Login Setup Failed",
+        message: "Supabase is not configured.",
+      });
+      return;
+    }
+
+    setProvisioningLogins(true);
+    try {
+      const results = [];
+      for (let start = 0; start < selectedIds.length; start += 100) {
+        const { data, error } = await supabase.functions.invoke(
+          "provision-student-logins",
+          { body: { student_ids: selectedIds.slice(start, start + 100) } },
+        );
+        if (error) throw error;
+        if (!Array.isArray(data?.results)) {
+          throw new Error(data?.error || "The provisioning service returned an invalid response.");
+        }
+        results.push(...data.results);
+      }
+
+      const readyCount = results.filter((result) => result.status === "ready").length;
+      const failedResults = results.filter((result) => result.status !== "ready");
+      setStatusModal({
+        open: true,
+        type: failedResults.length ? "failure" : "success",
+        title: failedResults.length ? "Some Logins Need Attention" : "Student Logins Ready",
+        message: [
+          `${readyCount} student login${readyCount === 1 ? "" : "s"} ready.`,
+          failedResults.length
+            ? `${failedResults.length} failed: ${failedResults
+                .slice(0, 5)
+                .map((result) => result.message || result.student_id)
+                .join("; ")}${failedResults.length > 5 ? "; more failures not shown." : ""}`
+            : "New accounts use the recorded parent/guardian contact as their temporary password. Existing passwords were not changed.",
+        ].join(" "),
+      });
+    } catch (error) {
+      setStatusModal({
+        open: true,
+        type: "failure",
+        title: "Login Setup Failed",
+        message: error?.message || "The student login provisioning service could not be reached.",
+      });
+    } finally {
+      setProvisioningLogins(false);
+    }
+  };
+
   const openStudentEditor = (student) => {
     setEditingStudent(student);
     setStudentDraft(buildStudentDraft(student));
@@ -4094,6 +4511,39 @@ function StudentsPage({
             )}
           </div>
         </div>
+
+        {canEditStudents && (
+          <div
+            className="card card-padded"
+            style={{
+              marginBottom: 12,
+              border: "1px solid #bfdbfe",
+              background: "#eff6ff",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              flexWrap: "wrap",
+            }}
+          >
+            <div>
+              <div style={{ fontWeight: 800 }}>Student portal logins</div>
+              <div style={{ color: "#475569", fontSize: ".85rem", marginTop: 4 }}>
+                Select student records below, then set up or retry their Student ID logins.
+              </div>
+            </div>
+            <button
+              className="btn btn-blue"
+              type="button"
+              disabled={provisioningLogins || selectedStudentIds.length === 0}
+              onClick={provisionSelectedStudentLogins}
+            >
+              {provisioningLogins
+                ? "Setting Up Logins..."
+                : `Set Up Logins for ${selectedStudentIds.length} Selected`}
+            </button>
+          </div>
+        )}
 
         {/* School and Class Selection Filters */}
         <div
@@ -4312,6 +4762,13 @@ function StudentsPage({
                                 >
                                   Edit
                                 </button>
+                                <button
+                                  className="btn btn-sm record-action-btn"
+                                  disabled={provisioningLogins}
+                                  onClick={() => provisionSelectedStudentLogins([String(s.id)])}
+                                >
+                                  Set Up Login
+                                </button>
                                 {canAssignRegisteredSchool && (
                                   <button
                                     className="btn btn-sm record-action-btn"
@@ -4395,6 +4852,13 @@ function StudentsPage({
                                 onClick={() => openStudentEditor(s)}
                               >
                                 Edit
+                              </button>
+                              <button
+                                className="btn btn-sm record-action-btn"
+                                disabled={provisioningLogins}
+                                onClick={() => provisionSelectedStudentLogins([String(s.id)])}
+                              >
+                                Set Up Login
                               </button>
                               {canAssignRegisteredSchool && (
                                 <button
@@ -4482,6 +4946,13 @@ function StudentsPage({
                                 onClick={() => openStudentEditor(s)}
                               >
                                 Edit
+                              </button>
+                              <button
+                                className="btn btn-sm record-action-btn"
+                                disabled={provisioningLogins}
+                                onClick={() => provisionSelectedStudentLogins([String(s.id)])}
+                              >
+                                Set Up Login
                               </button>
                               {canAssignRegisteredSchool && (
                                 <button
@@ -4632,6 +5103,13 @@ function StudentsPage({
                                     >
                                       Edit
                                     </button>
+                                    <button
+                                      className="btn btn-sm record-action-btn"
+                                      disabled={provisioningLogins}
+                                      onClick={() => provisionSelectedStudentLogins([String(s.id)])}
+                                    >
+                                      Set Up Login
+                                    </button>
                                     {canAssignRegisteredSchool && (
                                       <button
                                         className="btn btn-sm record-action-btn"
@@ -4748,6 +5226,13 @@ function StudentsPage({
                                         onClick={() => openStudentEditor(s)}
                                       >
                                         Edit
+                                      </button>
+                                      <button
+                                        className="btn btn-sm record-action-btn"
+                                        disabled={provisioningLogins}
+                                        onClick={() => provisionSelectedStudentLogins([String(s.id)])}
+                                      >
+                                        Set Up Login
                                       </button>
                                       {canAssignRegisteredSchool && (
                                         <button
@@ -4878,6 +5363,13 @@ function StudentsPage({
                                       >
                                         Edit
                                       </button>
+                                      <button
+                                        className="btn btn-sm record-action-btn"
+                                        disabled={provisioningLogins}
+                                        onClick={() => provisionSelectedStudentLogins([String(s.id)])}
+                                      >
+                                        Set Up Login
+                                      </button>
                                       {canAssignRegisteredSchool && (
                                         <button
                                           className="btn btn-sm record-action-btn"
@@ -5002,6 +5494,7 @@ function EnrollPage({ onBack, registeredSchoolId = null, onEnrolled = null, regi
   const [photoFileName, setPhotoFileName] = useState("");
   const [done, setDone] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [loginSetupMessage, setLoginSetupMessage] = useState("");
   const autoGeneratedIndexRef = useRef("");
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -5126,9 +5619,15 @@ function EnrollPage({ onBack, registeredSchoolId = null, onEnrolled = null, regi
       let insertPayload = { ...payload };
       let missingScopeColumn = false;
       let lastError = null;
+      let insertedStudentId = null;
       for (let attempt = 0; attempt < 8; attempt += 1) {
-        const { error } = await supabase.from("students").insert(insertPayload);
+        const { data, error } = await supabase
+          .from("students")
+          .insert(insertPayload)
+          .select("id")
+          .single();
         if (!error) {
+          insertedStudentId = data?.id || null;
           lastError = null;
           break;
         }
@@ -5185,6 +5684,34 @@ function EnrollPage({ onBack, registeredSchoolId = null, onEnrolled = null, regi
           "Student enrolled, but this database is missing registered_school_id on students. Run backend/supabase/migrations/004_add_registered_school_scope.sql so future records are school-scoped.",
         );
       }
+
+      if (!insertedStudentId) {
+        setLoginSetupMessage(
+          "The student record was saved, but its login could not be set up automatically. Use Set Up Student Logins in the student directory to retry.",
+        );
+      } else {
+        const { data, error } = await supabase.functions.invoke(
+          "provision-student-logins",
+          { body: { student_id: insertedStudentId } },
+        );
+        if (error || data?.failed || data?.results?.[0]?.status !== "ready") {
+          setLoginSetupMessage(
+            `The student was enrolled, but login setup failed: ${
+              data?.results?.[0]?.message ||
+              error?.message ||
+              "The provisioning service did not confirm the account."
+            } Use Set Up Student Logins in the student directory to retry.`,
+          );
+        } else {
+          setLoginSetupMessage(
+            "Student login is ready. Sign in with the 12-digit Student ID and the parent/guardian contact on record. The student should change the temporary password after first sign-in.",
+          );
+        }
+      }
+    } else {
+      setLoginSetupMessage(
+        "Supabase is not configured, so this local student record does not have a student login.",
+      );
     }
 
     if (typeof onEnrolled === "function") {
@@ -5206,6 +5733,19 @@ function EnrollPage({ onBack, registeredSchoolId = null, onEnrolled = null, regi
           <div className="alert alert-success" style={{ marginBottom: 0 }}>
             Student enrolled successfully!
           </div>
+          {loginSetupMessage && (
+            <div
+              className={`alert ${
+                loginSetupMessage.startsWith("Student login is ready")
+                  ? "alert-success"
+                  : "alert-warning"
+              }`}
+              style={{ marginTop: 12 }}
+              role="status"
+            >
+              {loginSetupMessage}
+            </div>
+          )}
           <div className="enroll-success-title">Admissions record created</div>
           <div className="enroll-success-sub">
             The student profile has been added and is ready for scores,
@@ -7481,6 +8021,7 @@ function SchoolAdminDashboardPage({
             <div className="school-workspace-title">
               {school?.name || user?.managed_school_name || "School Workspace"}
             </div>
+            <DashboardDateTime />
             <div className="school-workspace-sub">
               A refined operations view for the school account, covering student
               records, finance activity, admin access, and recent school-facing
@@ -8371,20 +8912,23 @@ function ResultsPage({ studentsData, tableInfo }) {
           gradeBg: grade.bg,
         };
       });
-  const gradePalette = {
-    A: "#16a34a",
-    B: "#1d4ed8",
-    C: "#d97706",
-    D: "#dc2626",
-    F: "#7f1d1d",
-  };
+  const donutSegments = Array.from({ length: 9 }, (_, index) =>
+    String(index + 1),
+  );
+  const gradePalette = Object.fromEntries(
+    donutSegments.map((grade) => [
+      grade,
+      getGrade([95, 82, 77, 72, 67, 62, 57, 52, 25][Number(grade) - 1])
+        .color,
+    ]),
+  );
   const gradeCounts = displayRows.reduce(
     (acc, row) => {
-      const key = String(row.grade || "F").toUpperCase();
+      const key = getGrade(Number(row.averageScore || 0)).grade;
       acc[key] = (acc[key] || 0) + 1;
       return acc;
     },
-    { A: 0, B: 0, C: 0, D: 0, F: 0 },
+    Object.fromEntries(donutSegments.map((grade) => [grade, 0])),
   );
   const totalCount = Math.max(displayRows.length, 1);
   const passCount = displayRows.filter(
@@ -8424,7 +8968,6 @@ function ResultsPage({ studentsData, tableInfo }) {
   const areaPoints = points
     ? `${points} ${chartW - 15},${chartH - 10} 15,${chartH - 10}`
     : "";
-  const donutSegments = ["A", "B", "C", "D", "F"];
   let progress = 0;
   const donutStops = donutSegments
     .map((grade) => {
@@ -10238,6 +10781,16 @@ function SettingsPage() {
     }
     setCfg((c) => ({ ...c, [k]: v }));
   };
+  const setStudentNavVisibility = (key, enabled) => {
+    setCfg((current) => ({
+      ...current,
+      ...(key === "results" ? { showResultsToStudents: enabled } : {}),
+      studentNavVisibility: {
+        ...getStudentNavVisibility(current),
+        [key]: enabled,
+      },
+    }));
+  };
   const classOptions = resolveClassOptions(cfg);
   useEffect(() => {
     setSelectedClassOption((current) =>
@@ -10429,6 +10982,8 @@ function SettingsPage() {
         const portalVisibilityKeys = [
           'adminFeesPortalEnabled',
           'studentFeesPortalEnabled',
+          'studentFeesSummaryVisible',
+          'studentSelectionDeadlineVisible',
           'studentDashboardEnabled',
           'studentProfileEnabled',
           'studentResultsEnabled',
@@ -10444,18 +10999,23 @@ function SettingsPage() {
           'studentAttendanceEnabled',
           'studentAttendanceCorrectionsEnabled',
           'studentAnnouncementsEnabled',
-          'studentAnnouncementsProEnabled',
           'studentSupportTicketsEnabled',
           'studentChatEnabled',
           'studentDocsEnabled',
           'studentUploadDocsEnabled',
           'studentResourcesEnabled',
           'studentAssignmentsEnabled',
-          'studentCalendarSyncEnabled'
+          "studentCalendarSyncEnabled",
+          "studentNavVisibility",
         ];
 
         for (const key of portalVisibilityKeys) {
-          if (cfg[key] !== globalCfg[key]) {
+          const changed =
+            key === "studentNavVisibility"
+              ? JSON.stringify(getStudentNavVisibility(cfg)) !==
+                JSON.stringify(getStudentNavVisibility(globalCfg))
+              : cfg[key] !== globalCfg[key];
+          if (changed) {
             setStatusModal({
               open: true,
               type: "failure",
@@ -10536,7 +11096,13 @@ function SettingsPage() {
         )}
       </div>
       <button
-        onClick={() => set(k, !cfg[k])}
+        onClick={() => {
+          const enabled = !cfg[k];
+          set(k, enabled);
+          if (k === "showResultsToStudents") {
+            setStudentNavVisibility("results", enabled);
+          }
+        }}
         style={{
           width: 48,
           height: 26,
@@ -10791,7 +11357,7 @@ function SettingsPage() {
         <Toggle
           k="showResultsToStudents"
           label="Show Results to Students"
-          sub="Students can view their academic scores and grades"
+          sub="Controls Results navigation and the dashboard score card"
         />
       </div>
 
@@ -10819,132 +11385,99 @@ function SettingsPage() {
           sub="Super admins can enable or hide portal pages and modules for students and admins."
         />
         {isSuperAdmin ? (
-          <>
-            <Toggle
-              k="adminFeesPortalEnabled"
-              label="Enable Fees in Admin Portals"
-              sub="Show fees pages in both admin and school-admin workspaces."
-            />
-            <Toggle
-              k="studentFeesPortalEnabled"
-              label="Enable Fees in Student Portal"
-              sub="Show fees, pay fees, and payment plan pages for students."
-            />
-            <Toggle
-                k="studentDashboardEnabled"
-                label="Enable Student Dashboard"
-                sub="Show the main student portal dashboard page."
+            <>
+              <Toggle
+                k="adminFeesPortalEnabled"
+                label="Enable Fees in Admin Portals"
+                sub="Show fees pages in both admin and school-admin workspaces."
+              />
+              <div style={{ marginTop: 16, fontWeight: 800 }}>
+                Student dashboard information
+              </div>
+              <Toggle
+                k="studentSelectionDeadlineVisible"
+                label="Show Selection Deadline"
+                sub="Show or hide the selection deadline on the student dashboard."
               />
               <Toggle
-                k="studentProfileEnabled"
-                label="Enable Student Profile"
-                sub="Show the student profile page."
+                k="studentFeesSummaryVisible"
+                label="Show Fees Status"
+                sub="Show or hide the fees summary card on the student dashboard."
               />
-              <Toggle
-                k="studentResultsEnabled"
-                label="Enable Results"
-                sub="Show academic results for students."
-              />
-              <Toggle
-                k="studentAnalyticsEnabled"
-                label="Enable Analytics"
-                sub="Show analytics and performance trends for students."
-              />
-              <Toggle
-                k="studentReportCardEnabled"
-                label="Enable Report Card"
-                sub="Show the student report card page."
-              />
-              <Toggle
-                k="studentStudyPlannerEnabled"
-                label="Enable Study Planner"
-                sub="Show the study planner page."
-              />
-              <Toggle
-                k="studentExamScheduleEnabled"
-                label="Enable Exam Schedule"
-                sub="Show exam schedule information to students."
-              />
-              <Toggle
-                k="studentLiveTestsEnabled"
-                label="Enable Live Tests"
-                sub="Show live test opportunities in the student portal."
-              />
-              <Toggle
-                k="studentGoalsEnabled"
-                label="Enable Goals"
-                sub="Show the student goals page."
-              />
-              <Toggle
-                k="studentSelectSchoolsEnabled"
-                label="Enable Select Schools"
-                sub="Show the student school selection page."
-              />
-              <Toggle
-                k="studentMySelectionEnabled"
-                label="Enable My Selection"
-                sub="Show the student selected schools review page."
-              />
-              <Toggle
-                k="studentSelectionPortalEnabled"
-                label="Enable Selection Portal Features"
-                sub="Show predictor and scholarships pages for students."
-              />
-              <Toggle
-                k="studentAttendanceEnabled"
-                label="Enable Attendance"
-                sub="Show the attendance summary page for students."
-              />
-              <Toggle
-                k="studentAttendanceCorrectionsEnabled"
-                label="Enable Attendance Corrections"
-                sub="Show the attendance correction request page."
-              />
-              <Toggle
-                k="studentAnnouncementsEnabled"
-                label="Enable Announcements"
-                sub="Show the main announcements page for students."
-              />
-              <Toggle
-                k="studentAnnouncementsProEnabled"
-                label="Enable Personalized Updates"
-                sub="Show personalized announcements and updates."
-              />
-              <Toggle
-                k="studentSupportTicketsEnabled"
-                label="Enable Support Tickets"
-                sub="Show the student support ticketing page."
-              />
-              <Toggle
-                k="studentChatEnabled"
-                label="Enable Chat"
-                sub="Show the chat page for student support."
-              />
-              <Toggle
-                k="studentDocsEnabled"
-                label="Enable Documents"
-                sub="Show the student documents overview page."
-              />
-              <Toggle
-                k="studentUploadDocsEnabled"
-                label="Enable Upload Documents"
-                sub="Show the document upload page for students."
-              />
-              <Toggle
-                k="studentResourcesEnabled"
-                label="Enable Learning Resources"
-                sub="Show the learning resources page for students."
-              />
-              <Toggle
-                k="studentAssignmentsEnabled"
-                label="Enable Assignments"
-                sub="Show the assignments page for students."
-              />
-              <Toggle
-                k="studentCalendarSyncEnabled"
-                label="Enable Calendar Sync"
-                sub="Show the calendar sync page for students."
-              />
+              <div style={{ marginTop: 16, fontWeight: 800 }}>
+                Student portal navigation
+              </div>
+              <div style={{ color: "#64748b", fontSize: ".8rem", marginBottom: 8 }}>
+                Turn each student navigation button on or off independently.
+              </div>
+              {(() => {
+                const visibility = getStudentNavVisibility(cfg);
+                return STUDENT_NAV.map((item, index) =>
+                  item.section ? (
+                    <div
+                      key={`${item.section}-${index}`}
+                      style={{
+                        padding: "14px 0 6px",
+                        color: "#475569",
+                        fontWeight: 800,
+                        borderBottom: "1px solid #e2e8f0",
+                      }}
+                    >
+                      {item.section}
+                    </div>
+                  ) : (
+                    <div
+                      key={item.key}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 12,
+                        padding: "9px 0",
+                        borderBottom: "1px solid #f1f5f9",
+                      }}
+                    >
+                      <span style={{ fontSize: ".9rem" }}>{item.label}</span>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={visibility[item.key] !== false}
+                        aria-label={`Show ${item.label} in student portal`}
+                        onClick={() =>
+                          setStudentNavVisibility(
+                            item.key,
+                            visibility[item.key] === false,
+                          )
+                        }
+                        style={{
+                          width: 48,
+                          height: 26,
+                          borderRadius: 13,
+                          background:
+                            visibility[item.key] !== false ? "#1a56db" : "#e2e8f0",
+                          border: "none",
+                          cursor: "pointer",
+                          position: "relative",
+                          flexShrink: 0,
+                        }}
+                      >
+                        <span
+                          style={{
+                            display: "block",
+                            width: 20,
+                            height: 20,
+                            borderRadius: "50%",
+                            background: "#fff",
+                            position: "absolute",
+                            top: 3,
+                            left: visibility[item.key] !== false ? 25 : 3,
+                          }}
+                        />
+                      </button>
+                    </div>
+                  ),
+                );
+              })()}
             </>
           ) : (
             <div className="alert alert-info">
@@ -13930,6 +14463,15 @@ function GradingPage() {
                 vals.reduce((a, b) => a + b, 0) / vals.length,
               );
               const g = getGrade(avg);
+              const dashboardGrade = Number(g.grade);
+              const dashboardGradeColors =
+                dashboardGrade <= 2
+                  ? { icon: "#00b86b", start: "#ecfff5", end: "#92f0c2", text: "#007a46" }
+                  : dashboardGrade <= 4
+                    ? { icon: "#0059ff", start: "#eff5ff", end: "#9cc2ff", text: "#0039a6" }
+                    : dashboardGrade <= 7
+                      ? { icon: "#ff7a00", start: "#fff4e8", end: "#ffc47a", text: "#a54800" }
+                      : { icon: "#dc2626", start: "#fff1f2", end: "#fecdd3", text: "#991b1b" };
               return (
                 <tr key={s.student_id}>
                   <td style={{ fontWeight: 700, whiteSpace: "nowrap" }}>
@@ -13979,6 +14521,7 @@ function StudentDashboard({
   feesData,
   selectionInfo,
   scoreValues,
+  onOpenLearningLibrary,
 }) {
   const { cfg } = useContext(SettingsContext);
   const student = studentData || {
@@ -14004,6 +14547,15 @@ function StudentDashboard({
       Math.max(Object.values(baseScores).length, 1),
   );
   const g = getGrade(avg);
+  const dashboardGrade = Number(g.grade);
+  const dashboardGradeColors =
+    dashboardGrade <= 2
+      ? { icon: "#00b86b", start: "#ecfff5", end: "#92f0c2", text: "#007a46" }
+      : dashboardGrade <= 4
+        ? { icon: "#0059ff", start: "#eff5ff", end: "#9cc2ff", text: "#0039a6" }
+        : dashboardGrade <= 7
+          ? { icon: "#ff7a00", start: "#fff4e8", end: "#ffc47a", text: "#a54800" }
+          : { icon: "#dc2626", start: "#fff1f2", end: "#fecdd3", text: "#991b1b" };
   const attendanceRows = Array.isArray(attendanceData) ? attendanceData : [];
   const feeRows = Array.isArray(feesData) ? feesData : [];
   const present = attendanceRows.filter(
@@ -14014,7 +14566,9 @@ function StudentDashboard({
       sum + Math.max((Number(f.amount) || 0) - (Number(f.paid) || 0), 0),
     0,
   );
-  const feesEnabled = cfg.studentFeesPortalEnabled !== false;
+  const feesEnabled =
+    cfg.studentFeesPortalEnabled !== false &&
+    cfg.studentFeesSummaryVisible !== false;
   const selectionEnabled = cfg.studentSelectSchoolsEnabled !== false;
   const selectionCount = Number(selectionInfo?.count || 0);
   const selectionStatus = String(
@@ -14026,6 +14580,7 @@ function StudentDashboard({
       : selectionStatus === "submitted" || selectionStatus === "pending"
         ? "Submitted"
         : "Not Submitted";
+  const resultsEnabled = getStudentNavVisibility(cfg).results;
   return (
     <div className="fade-in">
       <div className="profile-header">
@@ -14052,7 +14607,10 @@ function StudentDashboard({
             {student.region} Region &nbsp;·&nbsp;{" "}
             <strong>{cfg.currentTerm}</strong> &nbsp;·&nbsp; {cfg.academicYear}
           </div>
-          {selectionEnabled && cfg.selectionDeadline && (
+          <DashboardDateTime />
+          {selectionEnabled &&
+            cfg.studentSelectionDeadlineVisible !== false &&
+            cfg.selectionDeadline && (
             <div
               style={{
                 marginTop: 4,
@@ -14068,35 +14626,15 @@ function StudentDashboard({
       </div>
       <div className="stats-grid">
         {[
-          cfg.showResultsToStudents
+          resultsEnabled
             ? {
                 label: "Current Average",
                 value: baseScores.length ? `${avg}%` : "N/A",
                 sub: baseScores.length ? g.grade : "No score records",
-                ic:
-                  g.grade === "A1"
-                    ? "#00b86b"
-                    : g.grade === "B2" || g.grade === "B3"
-                      ? "#0059ff"
-                      : "#ff7a00",
-                bgStart:
-                  g.grade === "A1"
-                    ? "#ecfff5"
-                    : g.grade === "B2" || g.grade === "B3"
-                      ? "#eff5ff"
-                      : "#fff4e8",
-                bgEnd:
-                  g.grade === "A1"
-                    ? "#92f0c2"
-                    : g.grade === "B2" || g.grade === "B3"
-                      ? "#9cc2ff"
-                      : "#ffc47a",
-                text:
-                  g.grade === "A1"
-                    ? "#007a46"
-                    : g.grade === "B2" || g.grade === "B3"
-                      ? "#0039a6"
-                      : "#a54800",
+                ic: dashboardGradeColors.icon,
+                bgStart: dashboardGradeColors.start,
+                bgEnd: dashboardGradeColors.end,
+                text: dashboardGradeColors.text,
                 icon: "results",
               }
             : {
@@ -14172,6 +14710,15 @@ function StudentDashboard({
           </div>
         ))}
       </div>
+      <section className="card card-padded learning-dashboard-cta" style={{ marginTop: 16 }}>
+        <div>
+          <h3>Ready to study?</h3>
+          <p>Find BECE preparation, WASSCE lessons, and university course materials selected for your learning level.</p>
+        </div>
+        <button className="btn btn-blue" type="button" onClick={onOpenLearningLibrary}>
+          Open learning library
+        </button>
+      </section>
       <div className="card card-padded" style={{ marginTop: 12 }}>
         <h3 style={{ fontWeight: 700, marginBottom: 12 }}>Announcements</h3>
         {ANNOUNCEMENTS.map((a) => (
@@ -14192,6 +14739,10 @@ function StudentDashboard({
 // â”€â”€â”€ STUDENT PROFILE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function StudentProfile({ user, studentData }) {
   const { cfg } = useContext(SettingsContext);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordMessage, setPasswordMessage] = useState("");
+  const [savingPassword, setSavingPassword] = useState(false);
   const isLoadingProfile = !studentData;
   const student = studentData || {
     full_name: "Loading profile...",
@@ -14216,6 +14767,34 @@ function StudentProfile({ user, studentData }) {
   const readinessGrade = getGrade(readiness);
   const supportEmail = cfg.supportEmail || "support@campusghana.edu";
   const supportPhone = cfg.supportPhone || "+233 00 000 0000";
+  const changePassword = async () => {
+    if (newPassword.length < 8) {
+      setPasswordMessage("Choose a password with at least 8 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordMessage("The passwords do not match.");
+      return;
+    }
+    if (!supabase) {
+      setPasswordMessage("Supabase is not configured; the password was not changed.");
+      return;
+    }
+    setSavingPassword(true);
+    setPasswordMessage("");
+    const { error } = await supabase.auth.updateUser({
+      password: newPassword,
+      data: { campus_student_password_changed: true },
+    });
+    if (error) {
+      setPasswordMessage(`Password was not changed: ${error.message}`);
+    } else {
+      setPasswordMessage("Password changed successfully.");
+      setNewPassword("");
+      setConfirmPassword("");
+    }
+    setSavingPassword(false);
+  };
 
   return (
     <div className="fade-in">
@@ -14225,6 +14804,56 @@ function StudentProfile({ user, studentData }) {
           {cfg.systemName} • {cfg.currentTerm} • {cfg.academicYear}
         </div>
       </div>
+      <section className="card card-padded" style={{ marginBottom: 16 }}>
+        <div className="page-title" style={{ fontSize: "1rem" }}>
+          Change Password
+        </div>
+        <p className="page-sub">
+          Your first password is the parent or guardian contact on your school record.
+          Change it to a private password that only you know.
+        </p>
+        <div className="form-grid">
+          <div className="form-group">
+            <label className="form-label" htmlFor="student-new-password">
+              New password
+            </label>
+            <input
+              id="student-new-password"
+              className="form-control"
+              type="password"
+              autoComplete="new-password"
+              value={newPassword}
+              onChange={(event) => setNewPassword(event.target.value)}
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="student-confirm-password">
+              Confirm new password
+            </label>
+            <input
+              id="student-confirm-password"
+              className="form-control"
+              type="password"
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+            />
+          </div>
+        </div>
+        <button
+          className="btn btn-blue"
+          type="button"
+          onClick={changePassword}
+          disabled={savingPassword || !newPassword || !confirmPassword}
+        >
+          {savingPassword ? "Changing Password..." : "Change Password"}
+        </button>
+        {passwordMessage && (
+          <div className="alert alert-info" role="status" style={{ marginTop: 12 }}>
+            {passwordMessage}
+          </div>
+        )}
+      </section>
       {isLoadingProfile && (
         <div className="alert alert-info">Loading your profile data...</div>
       )}
@@ -15456,6 +16085,370 @@ function ReportCardPage({ studentData, attendanceData, feesData }) {
   );
 }
 
+function StudentAcademicResultsPage({ scoreRecords }) {
+  const records = Array.isArray(scoreRecords)
+    ? scoreRecords
+        .filter(
+          (record) =>
+            record?.subject &&
+            Number.isFinite(Number(record.score)) &&
+            Number(record.score) >= 0,
+        )
+        .map((record) => ({
+          ...record,
+          score: Number(record.score),
+          academicYear: record.academic_year || "Unspecified Academic Year",
+          term: record.term || "Unspecified Term",
+        }))
+    : [];
+  const years = new Map();
+  records.forEach((record) => {
+    if (!years.has(record.academicYear)) years.set(record.academicYear, new Map());
+    const terms = years.get(record.academicYear);
+    if (!terms.has(record.term)) terms.set(record.term, []);
+    terms.get(record.term).push(record);
+  });
+  const termOrder = ["first term", "second term", "third term"];
+  const compareTerms = (termA, termB) => {
+    const indexA = termOrder.indexOf(termA.toLowerCase());
+    const indexB = termOrder.indexOf(termB.toLowerCase());
+    if (indexA < 0 && indexB < 0) return termA.localeCompare(termB);
+    if (indexA < 0) return 1;
+    if (indexB < 0) return -1;
+    return indexA - indexB;
+  };
+  const sortedYears = [...years.entries()].sort(([yearA], [yearB]) => {
+    if (yearA === "Unspecified Academic Year") return 1;
+    if (yearB === "Unspecified Academic Year") return -1;
+    return yearB.localeCompare(yearA, undefined, { numeric: true });
+  });
+  const latestYear = sortedYears[0];
+  const latestTerm = latestYear
+    ? [...latestYear[1].entries()].sort(([termA], [termB]) =>
+        compareTerms(termA, termB),
+      )[0]
+    : null;
+  const latestTermRecords = latestTerm?.[1] || [];
+  const subjectAggregate = calculateSubjectAggregate(latestTermRecords);
+  const strongestSubject = [...latestTermRecords].sort(
+    (a, b) => b.score - a.score,
+  )[0];
+  const focusSubject = [...latestTermRecords].sort(
+    (a, b) => a.score - b.score,
+  )[0];
+  const averageOf = (items) =>
+    items.length
+      ? Math.round(
+          items.reduce((total, item) => total + item.score, 0) / items.length,
+        )
+      : 0;
+
+  return (
+    <div className="fade-in">
+      <div className="page-header">
+        <div className="page-title">Results & Analytics</div>
+        <div className="page-sub">
+          Review your performance and subject results across academic years.
+        </div>
+      </div>
+      {!!latestTermRecords.length && (
+        <section className="card card-padded" style={{ marginBottom: 16 }}>
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "baseline",
+              justifyContent: "space-between",
+              gap: 8,
+              marginBottom: 14,
+            }}
+          >
+            <h2 style={{ margin: 0, color: "#1e3a8a", fontSize: "1.1rem" }}>
+              Results Analytics
+            </h2>
+            <span style={{ color: "#64748b", fontSize: ".82rem" }}>
+              {latestTerm[0]} · {latestYear[0]}
+            </span>
+          </div>
+          <div className="stats-grid stats-grid-3">
+            <div className="stat-card" style={{ background: "#eef2ff" }}>
+              <div className="stat-label" style={{ color: "#1e3a8a" }}>
+                Term Average
+              </div>
+              <div className="stat-value" style={{ color: "#1e3a8a" }}>
+                {averageOf(latestTermRecords)}%
+              </div>
+              <div className="stat-sub" style={{ color: "#1e3a8a" }}>
+                Across {latestTermRecords.length} recorded subject
+                {latestTermRecords.length === 1 ? "" : "s"}
+              </div>
+            </div>
+            <div className="stat-card" style={{ background: "#dcfce7" }}>
+              <div className="stat-label" style={{ color: "#166534" }}>
+                Strongest Subject
+              </div>
+              <div
+                className="stat-value"
+                style={{ color: "#166534", fontSize: "1.1rem" }}
+              >
+                {strongestSubject?.subject || "N/A"}
+              </div>
+              <div className="stat-sub" style={{ color: "#166534" }}>
+                {strongestSubject ? `${strongestSubject.score}%` : "No score"}
+              </div>
+            </div>
+            <div className="stat-card" style={{ background: "#fff7ed" }}>
+              <div className="stat-label" style={{ color: "#9a3412" }}>
+                Focus Subject
+              </div>
+              <div
+                className="stat-value"
+                style={{ color: "#9a3412", fontSize: "1.1rem" }}
+              >
+                {focusSubject?.subject || "N/A"}
+              </div>
+              <div className="stat-sub" style={{ color: "#9a3412" }}>
+                {focusSubject ? `${focusSubject.score}%` : "No score"}
+              </div>
+            </div>
+          </div>
+          <div
+            style={{
+              marginTop: 14,
+              padding: 16,
+              border: "1px solid #dbe6f6",
+              borderRadius: 12,
+              background: "linear-gradient(145deg, #f8fbff, #eef5ff)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 8,
+              }}
+            >
+              <div>
+                <h3 style={{ margin: 0, color: "#1e3a8a", fontSize: ".95rem" }}>
+                  Six-Subject Aggregate
+                </h3>
+                <p style={{ margin: "4px 0 0", color: "#64748b", fontSize: ".76rem" }}>
+                  Four core grades plus your two best other subjects. Lower is
+                  stronger.
+                </p>
+              </div>
+              <strong
+                style={{
+                  color: subjectAggregate.aggregate == null ? "#64748b" : "#1e3a8a",
+                  fontSize: "1.6rem",
+                }}
+              >
+                {subjectAggregate.aggregate ?? "Pending"}
+              </strong>
+            </div>
+            {subjectAggregate.aggregate != null && (
+              <div
+                style={{
+                  marginTop: 4,
+                  color: "#64748b",
+                  fontSize: ".74rem",
+                  textAlign: "right",
+                }}
+              >
+                {subjectAggregate.aggregate >= 6 &&
+                subjectAggregate.aggregate <= 15
+                  ? "Very strong aggregate range"
+                  : "Lower aggregate totals indicate stronger performance"}
+              </div>
+            )}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+                gap: 8,
+                marginTop: 12,
+              }}
+            >
+              {[
+                ...subjectAggregate.coreSubjects.map((subject) => ({
+                  ...subject,
+                  group: "Core",
+                })),
+                ...subjectAggregate.bestElectives.map((subject) => ({
+                  ...subject,
+                  group: "Best other",
+                })),
+              ].map((subject) => (
+                <div
+                  key={`${subject.group}-${subject.subject}`}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    padding: "8px 10px",
+                    borderRadius: 8,
+                    background: "#fff",
+                    color: "#334155",
+                    fontSize: ".76rem",
+                  }}
+                >
+                  <span>{subject.subject}</span>
+                  <strong>
+                    Grade {subject.grade}{" "}
+                    <span style={{ color: "#94a3b8", fontWeight: 500 }}>
+                      ({subject.group})
+                    </span>
+                  </strong>
+                </div>
+              ))}
+            </div>
+            {subjectAggregate.aggregate == null && (
+              <p
+                style={{
+                  margin: "10px 0 0",
+                  color: "#92400e",
+                  fontSize: ".76rem",
+                }}
+              >
+                {subjectAggregate.missingCoreSubjects.length > 0
+                  ? `Awaiting core results: ${subjectAggregate.missingCoreSubjects.join(", ")}.`
+                  : `Add ${subjectAggregate.missingElectives} more non-core subject result${subjectAggregate.missingElectives === 1 ? "" : "s"} to calculate the aggregate.`}
+              </p>
+            )}
+          </div>
+          <div style={{ marginTop: 18 }}>
+            <h3 style={{ margin: "0 0 10px", fontSize: ".92rem" }}>
+              Subject Performance
+            </h3>
+            {[...latestTermRecords]
+              .sort((a, b) => a.subject.localeCompare(b.subject))
+              .map((record) => {
+                const grade = getGrade(record.score);
+                return (
+                  <div
+                    key={`${record.subject}-${record.exam_type}`}
+                    className="subject-progress-row"
+                  >
+                    <span className="subject-progress-label">
+                      {record.subject}
+                    </span>
+                    <div className="progress" style={{ flex: 1 }}>
+                      <div
+                        className="progress-bar"
+                        style={{
+                          width: `${Math.max(0, Math.min(100, record.score))}%`,
+                          background: grade.color,
+                        }}
+                      />
+                    </div>
+                    <span className="subject-progress-value">
+                      {record.score}%
+                    </span>
+                  </div>
+                );
+              })}
+          </div>
+        </section>
+      )}
+      {!records.length ? (
+        <div className="card card-padded" style={{ color: "#64748b" }}>
+          No academic results have been recorded yet.
+        </div>
+      ) : (
+        sortedYears.map(([year, terms]) => (
+          <section
+            key={year}
+            className="card card-padded"
+            style={{ marginBottom: 16 }}
+          >
+            <h2 style={{ margin: "0 0 14px", color: "#1e3a8a" }}>
+              Academic Year {year}
+            </h2>
+            {[...terms.entries()]
+              .sort(([termA], [termB]) => compareTerms(termA, termB))
+              .map(([term, termRecords]) => {
+                const sortedRecords = [...termRecords].sort((a, b) =>
+                  a.subject.localeCompare(b.subject),
+                );
+                return (
+                  <section
+                    key={`${year}-${term}`}
+                    style={{
+                      marginTop: 12,
+                      overflow: "hidden",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: 12,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        flexWrap: "wrap",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 8,
+                        padding: "12px 16px",
+                        background: "#f8fafc",
+                      }}
+                    >
+                      <h3 style={{ margin: 0, fontSize: "1rem" }}>{term}</h3>
+                      <span style={{ color: "#64748b", fontSize: ".82rem" }}>
+                        Average: {averageOf(termRecords)}% · {termRecords.length}{" "}
+                        result{termRecords.length === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                    <div className="table-wrap">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Subject</th>
+                            <th>Assessment</th>
+                            <th>Score</th>
+                            <th>Grade</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sortedRecords.map((record, index) => {
+                            const grade = getGrade(record.score);
+                            return (
+                              <tr
+                                key={
+                                  record.id ||
+                                  `${record.subject}-${record.exam_type}-${index}`
+                                }
+                              >
+                                <td>{record.subject}</td>
+                                <td>{record.exam_type || "Assessment"}</td>
+                                <td>{record.score}%</td>
+                                <td>
+                                  <span
+                                    className="grade-chip"
+                                    style={{
+                                      background: grade.bg,
+                                      color: grade.color,
+                                    }}
+                                  >
+                                    {grade.grade}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+                );
+              })}
+          </section>
+        ))
+      )}
+    </div>
+  );
+}
+
 function StudentResultsPage({ scoreValues, attendanceData, feesData }) {
   const rows = (scoreValues || []).map((score, i) => {
     const gradeInfo = getGrade(Number(score || 0));
@@ -15479,11 +16472,11 @@ function StudentResultsPage({ scoreValues, attendanceData, feesData }) {
     : null;
   const gradeCounts = rows.reduce(
     (acc, row) => {
-      const key = String(row.grade || "F").toUpperCase();
+      const key = row.grade || "9";
       acc[key] = (acc[key] || 0) + 1;
       return acc;
     },
-    { A: 0, B: 0, C: 0, D: 0, F: 0 },
+    Object.fromEntries(Array.from({ length: 9 }, (_, index) => [String(index + 1), 0])),
   );
   const values = rows.map((row) => Number(row.score || 0)).filter((v) => Number.isFinite(v));
   const avg = values.length
@@ -15504,13 +16497,14 @@ function StudentResultsPage({ scoreValues, attendanceData, feesData }) {
   const { cfg } = useContext(SettingsContext);
   const feesEnabled = cfg.studentFeesPortalEnabled !== false;
   const total = Math.max(rows.length, 1);
-  const summarySegments = [
-    { grade: "A", color: "#16a34a" },
-    { grade: "B", color: "#1d4ed8" },
-    { grade: "C", color: "#d97706" },
-    { grade: "D", color: "#dc2626" },
-    { grade: "F", color: "#7f1d1d" },
-  ];
+  const summarySegments = Array.from({ length: 9 }, (_, index) => {
+    const grade = String(index + 1);
+    const representativeScores = [95, 82, 77, 72, 67, 62, 57, 52, 25];
+    return {
+      grade,
+      color: getGrade(representativeScores[index]).color,
+    };
+  });
   let studentProgress = 0;
   const studentDonut = summarySegments
     .map((segment) => {
@@ -16462,71 +17456,6 @@ function StudentPaymentPlansPage({ feesData }) {
         {plans.map((plan) => (
           <div className="alert alert-info" style={{ marginTop: 12 }} key={plan.id}>
             Plan requested: {plan.months} months at GHS {plan.installment}/month ({plan.status}).
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function PersonalizedAnnouncementsPage() {
-  const {
-    records: readRecords,
-    error,
-    saveRecord,
-  } = useStudentPortalRecords("announcement_read");
-  const readIds = readRecords.map((record) => String(record.announcement_id));
-  const items = ANNOUNCEMENTS.map((a) => ({
-    ...a,
-    audience:
-      a.type === "urgent"
-        ? "All Students"
-        : a.type === "info"
-          ? "Current Cohort"
-          : "My Class",
-  }));
-  const markRead = (id) =>
-    saveRecord(
-      { announcement_id: id, read_at: new Date().toISOString() },
-      String(id),
-    );
-  return (
-    <div className="fade-in">
-      <div className="page-header">
-        <div className="page-title">Personalized Announcements</div>
-        <div className="page-sub">
-          Unread/read announcements targeted to your cohort.
-        </div>
-        {error && <div className="alert alert-warning">{error}</div>}
-      </div>
-      <div style={{ display: "grid", gap: 10 }}>
-        {items.map((a) => (
-          <div
-            key={a.id}
-            className="card card-padded"
-            style={{
-              borderLeft: `4px solid ${readIds.includes(String(a.id)) ? "#cbd5e1" : "#1d4ed8"}`,
-            }}
-          >
-            <div className="announcement-head">
-              <div style={{ fontWeight: 700 }}>{a.title}</div>
-              <span
-                className={`badge ${readIds.includes(String(a.id)) ? "badge-gray" : "badge-blue"}`}
-              >
-                {readIds.includes(String(a.id)) ? "read" : "unread"}
-              </span>
-            </div>
-            <div style={{ fontSize: ".84rem", color: "#64748b", marginTop: 4 }}>
-              Audience: {a.audience}
-            </div>
-            <div style={{ marginTop: 8 }}>{a.body}</div>
-            <button
-              className="btn btn-sm btn-outline"
-              style={{ marginTop: 8 }}
-              onClick={() => markRead(a.id)}
-            >
-              Mark Read
-            </button>
           </div>
         ))}
       </div>
@@ -19133,6 +20062,8 @@ function StudyContentPage({ currentUser }) {
     title: '',
     description: '',
     content_type: 'lesson',
+    education_level: 'jhs',
+    resource_kind: 'lesson_notes',
     subject: '',
     class_level: '',
     content: '',
@@ -19391,6 +20322,8 @@ function StudyContentPage({ currentUser }) {
           title: item.title,
           description: item.description || '',
           content_type: item.content_type || 'lesson',
+          education_level: item.education_level || 'all',
+          resource_kind: item.resource_kind || 'lesson_notes',
           subject: item.subject || '',
           class_level: item.class_level || '',
           content: item.content || '',
@@ -19556,6 +20489,8 @@ function StudyContentPage({ currentUser }) {
       title: '',
       description: '',
       content_type: 'lesson',
+      education_level: 'jhs',
+      resource_kind: 'lesson_notes',
       subject: '',
       class_level: '',
       content: '',
@@ -19663,6 +20598,8 @@ function StudyContentPage({ currentUser }) {
       title: item.title,
       description: item.description || '',
       content_type: item.content_type,
+      education_level: item.education_level || 'all',
+      resource_kind: item.resource_kind || 'lesson_notes',
       subject: item.subject || '',
       class_level: item.class_level || '',
       content: item.content || '',
@@ -19809,8 +20746,8 @@ function StudyContentPage({ currentUser }) {
     return (
       <div className="fade-in">
         <div className="page-header">
-          <div className="page-title">📚 Study Content</div>
-          <div className="page-sub">Loading content...</div>
+          <div className="page-title">Learning Library</div>
+          <div className="page-sub">Loading BECE, WASSCE, and university resources...</div>
         </div>
         <div style={{ textAlign: 'center', padding: '40px' }}>
           <div className="spinner"></div>
@@ -19822,8 +20759,8 @@ function StudyContentPage({ currentUser }) {
   return (
     <div className="fade-in study-content-page">
       <div className="page-header">
-        <div className="page-title">📚 Study Content</div>
-        <div className="page-sub">Create and manage educational content for students</div>
+        <div className="page-title">Learning Library</div>
+        <div className="page-sub">Publish BECE preparation, WASSCE core and elective lessons, and university course resources.</div>
       </div>
 
       <div className="page-actions-row">
@@ -19968,9 +20905,11 @@ function StudyContentPage({ currentUser }) {
                 </div>
               </div>
               <div className="test-meta">
-                <div className="test-subject">Type: {item.content_type}</div>
+                <div className="test-subject">{getLearningResourceLabel(item.resource_kind)}</div>
+                <div className="test-subject">{item.education_level === "all" ? "All learning levels" : getLearningLevelName(item.education_level)}</div>
+                <div className="test-subject">Format: {item.content_type}</div>
                 {item.subject && <div className="test-subject">Subject: {item.subject}</div>}
-                {item.class_level && <div className="test-class">Class: {item.class_level}</div>}
+                {item.class_level && <div className="test-class">{item.education_level === "university" ? "Course:" : "Class:"} {item.class_level}</div>}
                 {item.chapters?.length > 0 && <div className="test-subject">Chapters: {item.chapters.length}</div>}
                 <div className="test-duration">Read time: {item.estimated_read_time} min</div>
               </div>
@@ -20029,8 +20968,8 @@ function StudyContentPage({ currentUser }) {
 
       {content.length === 0 && (
         <div className="empty-state">
-          <div className="empty-title">No Study Content Yet</div>
-          <div className="empty-subtitle">Create your first lesson or article to get started</div>
+          <div className="empty-title">No learning materials yet</div>
+          <div className="empty-subtitle">Publish BECE, WASSCE, or university resources from the Learning Library editor.</div>
         </div>
       )}
 
@@ -20065,6 +21004,37 @@ function StudyContentPage({ currentUser }) {
               </div>
               <div className="form-row">
                 <div className="form-group">
+                  <label>Learning audience</label>
+                  <select
+                    className="form-input"
+                    value={contentForm.education_level}
+                    onChange={(e) => setContentForm({ ...contentForm, education_level: e.target.value })}
+                  >
+                    {LEARNING_LEVELS.map((level) => (
+                      <option key={level.key} value={level.key}>
+                        {level.label}
+                      </option>
+                    ))}
+                    <option value="all">All learning levels</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Material focus</label>
+                  <select
+                    className="form-input"
+                    value={contentForm.resource_kind}
+                    onChange={(e) => setContentForm({ ...contentForm, resource_kind: e.target.value })}
+                  >
+                    {LEARNING_RESOURCE_TYPES.map((resourceType) => (
+                      <option key={resourceType.key} value={resourceType.key}>
+                        {resourceType.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="form-row">
+                <div className="form-group">
                   <label>Content Type</label>
                   <select
                     className="form-input"
@@ -20093,23 +21063,29 @@ function StudyContentPage({ currentUser }) {
               </div>
               <div className="form-row">
                 <div className="form-group">
-                  <label>Subject</label>
+                  <label>{contentForm.education_level === "university" ? "Course or subject" : "Subject"}</label>
                   <input
                     type="text"
                     className="form-input"
+                    list={`learning-subjects-${contentForm.education_level}`}
                     value={contentForm.subject}
                     onChange={(e) => setContentForm({...contentForm, subject: e.target.value})}
-                    placeholder="e.g., Mathematics, Science"
+                    placeholder={contentForm.education_level === "university" ? "Search or enter a course" : "Search or enter a subject"}
                   />
+                  <datalist id={`learning-subjects-${contentForm.education_level}`}>
+                    {(LEARNING_SUBJECTS[contentForm.education_level] || []).map((subject) => (
+                      <option key={subject} value={subject} />
+                    ))}
+                  </datalist>
                 </div>
                 <div className="form-group">
-                  <label>Class Level</label>
+                  <label>{contentForm.education_level === "university" ? "Course / paper code" : "Class level"}</label>
                   <input
                     type="text"
                     className="form-input"
                     value={contentForm.class_level}
                     onChange={(e) => setContentForm({...contentForm, class_level: e.target.value})}
-                    placeholder="e.g., JHS 1, SHS 2"
+                    placeholder={contentForm.education_level === "university" ? "e.g., CS 201" : contentForm.education_level === "shs" ? "e.g., SHS 2" : "e.g., JHS 3"}
                   />
                 </div>
               </div>
@@ -20455,162 +21431,31 @@ const ADMIN_NAV = [
   { key: "confirmed", icon: "confirmed", label: "Confirmed", color: "#16a34a" },
   { section: "Academic Management" },
   { key: "scores", icon: "scores", label: "Test Scores", color: "#f43f5e" },
-  {
-    key: "academic-scores",
-    icon: "grading",
-    label: "Academic Scores",
-    color: "#0ea5e9",
-  },
+  { key: "academic-scores", icon: "grading", label: "Academic Scores", color: "#0ea5e9" },
   { key: "results", icon: "results", label: "Results", color: "#f97316" },
   { key: "grading", icon: "grading", label: "Grade Report", color: "#ec4899" },
-  {
-    key: "live-tests",
-    icon: "quiz",
-    label: "Live Tests",
-    color: "#f59e0b",
-  },
-  {
-    key: "study-content",
-    icon: "docs",
-    label: "Study Content",
-    color: "#10b981",
-  },
+  { key: "study-content", icon: "docs", label: "Learning Library", color: "#10b981" },
   { key: "analytics", icon: "analytics", label: "Analytics", color: "#7c3aed" },
-  { section: "Student Services" },
-  {
-    key: "attendance",
-    icon: "attendance",
-    label: "Attendance",
-    color: "#14b8a6",
-  },
+  { section: "Fees & Finance" },
   { key: "fees", icon: "fees", label: "Fees", color: "#22c55e" },
-  { key: "teachers", icon: "teachers", label: "Teachers", color: "#8b5cf6" },
   { section: "Communication" },
   { key: "chat", icon: "chat", label: "Chat", color: "#10b981" },
-  { key: "events", icon: "events", label: "Events", color: "#f59e0b" },
+  { key: "documents", icon: "docs", label: "Documents", color: "#7c2d12" },
   { section: "Administration" },
   { key: "finance", icon: "finance", label: "Finance", color: "#d97706" },
   { key: "settings", icon: "settings", label: "Settings", color: "#64748b" },
-  {
-    key: "registered-schools",
-    icon: "schools",
-    label: "Registered Schools",
-    color: "#0f766e",
-  },
-  { section: "Platform Suite" },
+  { key: "registered-schools", icon: "schools", label: "Registered Schools", color: "#0f766e" },
   { key: "permissions", icon: "lock", label: "Permissions", color: "#1d4ed8" },
   { key: "audit", icon: "docs", label: "Audit Trail", color: "#0f766e" },
-  { key: "notify", icon: "bell", label: "Notifications", color: "#b45309" },
   { key: "payments", icon: "fees", label: "Payments", color: "#15803d" },
-  { key: "documents", icon: "docs", label: "Documents", color: "#7c2d12" },
   { key: "reports", icon: "results", label: "Reports", color: "#7c3aed" },
-  {
-    key: "insights",
-    icon: "analytics",
-    label: "Advanced Insights",
-    color: "#4338ca",
-  },
-  { key: "bulk", icon: "students", label: "Bulk Operations", color: "#334155" },
-  {
-    key: "offline",
-    icon: "attendance",
-    label: "Offline Sync",
-    color: "#0369a1",
-  },
-  {
-    key: "calendar",
-    icon: "events",
-    label: "Academic Calendar",
-    color: "#d97706",
-  },
-  { key: "helpdesk", icon: "support", label: "Helpdesk", color: "#0f766e" },
-  { key: "privacy", icon: "lock", label: "Privacy", color: "#991b1b" },
-  { key: "recovery", icon: "finance", label: "Recovery", color: "#1e40af" },
-  { key: "mobile", icon: "profile", label: "Mobile & PWA", color: "#7c3aed" },
-  { section: "Expansion Features" },
-  {
-    key: "auto-rules",
-    icon: "settings",
-    label: "Automation Rules",
-    color: "#1d4ed8",
-  },
-  { key: "ai-assist", icon: "chat", label: "AI Assistant", color: "#0f766e" },
-  {
-    key: "risk-score",
-    icon: "analytics",
-    label: "Risk Scoring",
-    color: "#dc2626",
-  },
-  { key: "timetable", icon: "events", label: "Timetable", color: "#0369a1" },
-  {
-    key: "exam-builder",
-    icon: "docs",
-    label: "Exam Builder",
-    color: "#7c3aed",
-  },
-  {
-    key: "installments",
-    icon: "fees",
-    label: "Installments",
-    color: "#15803d",
-  },
-  { key: "campaigns", icon: "bell", label: "Campaigns", color: "#b45309" },
-  {
-    key: "recommend",
-    icon: "schools",
-    label: "Recommendations",
-    color: "#1e40af",
-  },
-  { key: "digital-id", icon: "profile", label: "Digital ID", color: "#4338ca" },
-  {
-    key: "public-status",
-    icon: "results",
-    label: "Public Status",
-    color: "#0f766e",
-  },
-  {
-    key: "integrations",
-    icon: "settings",
-    label: "Integrations",
-    color: "#7c2d12",
-  },
-  { key: "tenants", icon: "students", label: "Multi-Tenant", color: "#334155" },
-  { key: "quality", icon: "docs", label: "Data Quality", color: "#991b1b" },
-  { key: "sla", icon: "pending", label: "Approval SLA", color: "#d97706" },
-  { key: "flags", icon: "lock", label: "Feature Flags", color: "#475569" },
-  { section: "New Features & Services" },
-  { key: "peer-tutoring", icon: "students", label: "Peer Tutoring", color: "#7c3aed" },
-  { key: "counseling", icon: "support", label: "Mental Health & Counseling", color: "#06b6d4" },
-  { key: "library", icon: "docs", label: "Library Management", color: "#8b5cf6" },
-  { key: "alumni", icon: "schools", label: "Alumni Portal", color: "#0ea5e9" },
-  { key: "scholarships", icon: "finance", label: "Scholarships", color: "#f59e0b" },
-  { key: "conferences", icon: "events", label: "Parent-Teacher Conferences", color: "#ec4899" },
-  { key: "medical", icon: "profile", label: "Medical Records", color: "#ef4444" },
-  { key: "transport", icon: "events", label: "Transport & Hostel", color: "#14b8a6" },
-  { section: "Virtual Learning Environment" },
-  { key: "virtual-classroom", icon: "schools", label: "Virtual Classroom", color: "#7c3aed" },
-  { key: "course-marketplace", icon: "finance", label: "Course Marketplace", color: "#f59e0b" },
-  { key: "live-streaming", icon: "events", label: "Live Streaming", color: "#ef4444" },
-  { key: "interactive-whiteboard", icon: "docs", label: "Interactive Whiteboard", color: "#ec4899" },
-  { key: "video-conferencing", icon: "profile", label: "Video Conferencing", color: "#8b5cf6" },
-  { key: "learning-analytics", icon: "analytics", label: "Learning Analytics", color: "#06b6d4" },
-  { key: "gamification", icon: "support", label: "Gamification", color: "#f97316" },
-  { key: "adaptive-learning", icon: "chat", label: "Adaptive Learning", color: "#0ea5e9" },
-  { key: "collaborative-projects", icon: "students", label: "Collaborative Projects", color: "#22c55e" },
-  { key: "mobile-learning", icon: "profile", label: "Mobile Learning", color: "#d97706" },
-  { key: "ai-tutor", icon: "chat", label: "AI Tutor", color: "#7c2d12" },
 ];
 
 const ADMIN_SUBPAGE_MAP = {
-  "registered-schools": ["school-register"],
-  settings: ["auto-rules", "integrations", "flags"],
-  analytics: ["insights", "risk-score", "recommend", "quality"],
-  // Add Academic Scores as a standalone page (not a subpage)
-  events: ["calendar", "timetable", "exam-builder", "public-status"],
-  fees: ["payments", "installments"],
-  notify: ["campaigns", "helpdesk"],
-  permissions: ["audit", "privacy", "sla"],
-  students: ["digital-id", "tenants", "bulk", "offline", "documents"],
+  schools: ["registered-schools"],
+  settings: ["permissions", "audit"],
+  analytics: ["reports"],
+  fees: ["payments"],
 };
 
 const dedupeNavEntries = (items) => {
@@ -20630,6 +21475,13 @@ const dedupeSubpageKeys = (keys) => {
     seen.add(key);
     return true;
   });
+};
+
+const readAvailableTab = (storageKey, navItems) => {
+  const storedTab = readStoredTab(storageKey, "dashboard");
+  return navItems.some((item) => item.key === storedTab)
+    ? storedTab
+    : "dashboard";
 };
 
 const getPriorityBottomKeys = (priorityKeys, navItems, blockedKeys = new Set(), limit = 5) => {
@@ -20656,18 +21508,11 @@ const getPriorityBottomKeys = (priorityKeys, navItems, blockedKeys = new Set(), 
 };
 
 const SCHOOL_ADMIN_EXCLUDED_KEYS = new Set([
+  "super-admin-control",
   "settings",
   "registered-schools",
-  "school-register",
   "permissions",
   "audit",
-  "privacy",
-  "recovery",
-  "mobile",
-  "integrations",
-  "tenants",
-  "flags",
-  "auto-rules",
 ]);
 const SCHOOL_ADMIN_SUBPAGE_MAP = Object.fromEntries(
   Object.entries(ADMIN_SUBPAGE_MAP)
@@ -20707,630 +21552,9 @@ const SCHOOL_ADMIN_NAV = (() => {
 })();
 
 // STUDENT STUDY CONTENT PAGE
-function StudentStudyContentPage({ user, studentData }) {
-  const [content, setContent] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedContent, setSelectedContent] = useState(null);
-  const [activeChapterIndex, setActiveChapterIndex] = useState(0);
-  const [showContentModal, setShowContentModal] = useState(false);
-  const [questions, setQuestions] = useState([]);
-  const [showQuiz, setShowQuiz] = useState(false);
-  const [quizAnswers, setQuizAnswers] = useState({});
-  const [quizSubmitted, setQuizSubmitted] = useState(false);
-  const [quizScore, setQuizScore] = useState(0);
-  const [quizPassed, setQuizPassed] = useState(false);
-  const [progress, setProgress] = useState({});
-  const [progressError, setProgressError] = useState("");
-
-  useEffect(() => {
-    loadContent();
-    loadProgress();
-  }, []);
-
-  const loadContent = async () => {
-    if (!supabase) {
-      setContent([]);
-      setLoading(false);
-      return;
-    }
-
-    try {
-      const { data, error } = await supabase
-        .from('study_content')
-        .select('*')
-        .eq('is_published', true)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setContent(data || []);
-    } catch (error) {
-      console.error('Error loading content:', error);
-      setContent([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const getProgressKey = (contentId, chapterIndex) => {
-    return typeof chapterIndex === 'number' ? `${contentId}:${chapterIndex}` : contentId;
-  };
-
-  const hasChapters = (item) => Array.isArray(item?.chapters) && item.chapters.length > 0;
-
-  const isChapterCompleted = (contentId, chapterIndex) => {
-    return !!progress[getProgressKey(contentId, chapterIndex)]?.completed;
-  };
-
-  const isContentCompleted = (item) => {
-    if (!hasChapters(item)) {
-      return progress[item.id]?.progress_percentage === 100;
-    }
-    return item.chapters.every((_, index) => isChapterCompleted(item.id, index));
-  };
-
-  const getNextIncompleteChapter = (item) => {
-    if (!hasChapters(item)) return -1;
-    return item.chapters.findIndex((_, index) => !isChapterCompleted(item.id, index));
-  };
-
-  const saveProgressEntry = async (contentId, chapterIndex, entry) => {
-    if (!supabase || !studentData?.id) {
-      setProgressError("Study progress requires a linked Supabase student account.");
-      return;
-    }
-
-    const key = getProgressKey(contentId, chapterIndex);
-    const { data, error } = await supabase
-      .from("student_study_progress")
-      .upsert(
-        {
-          student_id: studentData.id,
-          content_id: contentId,
-          chapter_index: typeof chapterIndex === "number" ? chapterIndex : null,
-          progress_percentage: entry.progress_percentage ?? 100,
-          completed: !!entry.completed,
-          completed_at: entry.completed ? new Date().toISOString() : null,
-          last_accessed_at: new Date().toISOString(),
-        },
-        { onConflict: "student_id,content_id,chapter_key" },
-      )
-      .select()
-      .single();
-    if (error) {
-      setProgressError(`Study progress was not saved: ${error.message}`);
-      return;
-    }
-
-    setProgressError("");
-    setProgress((current) => ({ ...current, [key]: data }));
-  };
-
-  const loadProgress = async () => {
-    if (!supabase || !studentData?.id) {
-      setProgress({});
-      setProgressError("Study progress requires a linked Supabase student account.");
-      return;
-    }
-
-    try {
-      const { data, error } = await supabase
-        .from('student_study_progress')
-        .select('*')
-        .eq('student_id', studentData.id);
-
-      if (error) throw error;
-
-      const progressMap = {};
-      (data || []).forEach((item) => {
-        const key = typeof item.chapter_index === 'number'
-          ? getProgressKey(item.content_id, item.chapter_index)
-          : getProgressKey(item.content_id);
-        progressMap[key] = item;
-      });
-
-      setProgress(progressMap);
-      setProgressError("");
-    } catch (error) {
-      console.error('Error loading progress:', error);
-      setProgress({});
-      setProgressError(
-        `Study progress could not be loaded: ${error.message || "Supabase request failed."}`,
-      );
-    }
-  };
-
-  const openContent = async (item) => {
-    const nextChapter = getNextIncompleteChapter(item);
-    setSelectedContent(item);
-    setActiveChapterIndex(nextChapter >= 0 ? nextChapter : 0);
-    setShowContentModal(true);
-
-    if (!hasChapters(item)) {
-      await saveProgressEntry(item.id, null, {
-        progress_percentage: 100,
-        completed: true,
-      });
-    }
-  };
-
-  const startQuiz = async (contentId, chapterIndex = null) => {
-    if (!supabase) return;
-
-    try {
-      let query = supabase
-        .from('study_questions')
-        .select(`
-          *,
-          study_answers (*)
-        `)
-        .eq('content_id', contentId)
-        .order('order_index');
-
-      if (typeof chapterIndex === 'number') {
-        query = query.eq('chapter_index', chapterIndex);
-      }
-
-      const { data, error } = await query;
-      if (error) throw error;
-
-      const quizQuestions = data || [];
-      if (quizQuestions.length === 0) {
-        alert('No quiz questions found for this chapter. Please ask the instructor to add chapter-specific questions.');
-        return;
-      }
-
-      setQuestions(quizQuestions);
-      setShowQuiz(true);
-      setQuizAnswers({});
-      setQuizSubmitted(false);
-      setQuizScore(0);
-      setQuizPassed(false);
-    } catch (error) {
-      console.error('Error loading questions:', error);
-      alert('Failed to load quiz questions');
-    }
-  };
-
-  const submitQuiz = async () => {
-    if (!supabase || !studentData?.id || !selectedContent) return;
-
-    let totalScore = 0;
-    let earnedScore = 0;
-
-    questions.forEach((question) => {
-      totalScore += question.points;
-      const userAnswer = quizAnswers[question.id];
-      let questionCorrect = false;
-
-      if (question.question_type === 'multiple_choice') {
-        const correctAnswer = question.study_answers?.find((a) => a.is_correct);
-        questionCorrect = correctAnswer && userAnswer === correctAnswer.id;
-      } else if (question.question_type === 'true_false') {
-        questionCorrect = userAnswer === question.correct_answer;
-      } else if (question.question_type === 'short_answer' || question.question_type === 'essay') {
-        questionCorrect = Boolean(userAnswer && String(userAnswer).trim());
-      }
-
-      if (questionCorrect) {
-        earnedScore += question.points;
-      }
-    });
-
-    const passingScore = Math.ceil(totalScore * 0.7);
-    const passed = earnedScore >= passingScore;
-
-    setQuizScore(earnedScore);
-    setQuizSubmitted(true);
-    setQuizPassed(passed);
-
-    const progressEntry = {
-      completed: passed,
-      score: earnedScore,
-      progress_percentage: passed ? 100 : Math.round((earnedScore / Math.max(totalScore, 1)) * 100),
-    };
-
-    const chapterIndex = hasChapters(selectedContent) ? activeChapterIndex : null;
-    await saveProgressEntry(selectedContent.id, chapterIndex, progressEntry);
-
-    try {
-      const attempts = questions.map((question) => {
-        const userAnswer = quizAnswers[question.id] || '';
-        let isCorrect = false;
-
-        if (question.question_type === 'multiple_choice') {
-          const correctAnswer = question.study_answers?.find((a) => a.is_correct);
-          isCorrect = correctAnswer && userAnswer === correctAnswer.id;
-        } else if (question.question_type === 'true_false') {
-          isCorrect = userAnswer === question.correct_answer;
-        } else if (question.question_type === 'short_answer' || question.question_type === 'essay') {
-          isCorrect = Boolean(userAnswer && String(userAnswer).trim());
-        }
-
-        return {
-          student_id: studentData.id,
-          question_id: question.id,
-          answer_text: userAnswer,
-          is_correct: isCorrect,
-          points_earned: isCorrect ? question.points : 0,
-        };
-      });
-
-      const { error } = await supabase
-        .from('student_question_attempts')
-        .upsert(attempts, { onConflict: 'student_id,question_id' });
-
-      if (error) throw error;
-    } catch (error) {
-      console.error('Error saving quiz attempts:', error);
-    }
-  };
-
-  const getDifficultyColor = (level) => {
-    switch (level) {
-      case 'beginner': return '#10b981';
-      case 'intermediate': return '#f59e0b';
-      case 'advanced': return '#ef4444';
-      default: return '#6b7280';
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="fade-in">
-        <div className="page-header">
-          <div className="page-title">📚 Study Content</div>
-          <div className="page-sub">Loading content...</div>
-        </div>
-        <div style={{ textAlign: 'center', padding: '40px' }}>
-          <div className="spinner"></div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="fade-in">
-      <div className="page-header">
-        <div className="page-title">📚 Study Content</div>
-        <div className="page-sub">Learn and practice with educational content</div>
-      </div>
-      {progressError && <div className="alert alert-warning">{progressError}</div>}
-
-      <div className="tests-grid">
-        {content.map((item) => {
-          const completed = isContentCompleted(item);
-
-          return (
-            <div key={item.id} className="test-card">
-              <div className="test-header">
-                <div className="test-title">{item.title}</div>
-                <div
-                  className="test-status"
-                  style={{
-                    background: getDifficultyColor(item.difficulty_level),
-                    color: 'white'
-                  }}
-                >
-                  {item.difficulty_level}
-                </div>
-              </div>
-              <div className="test-meta">
-                <div className="test-subject">Type: {item.content_type}</div>
-                {item.subject && <div className="test-subject">Subject: {item.subject}</div>}
-                {item.class_level && <div className="test-class">Class: {item.class_level}</div>}
-                {Array.isArray(item.chapters) && item.chapters.length > 0 && (
-                  <div className="test-subject">Chapters: {item.chapters.length}</div>
-                )}
-                <div className="test-duration">Read time: {item.estimated_read_time} min</div>
-              </div>
-              <div className="test-description">{item.description}</div>
-              {completed && (
-                <div style={{ color: '#10b981', fontWeight: 'bold', marginBottom: '12px' }}>
-                  ✓ Completed
-                </div>
-              )}
-              <div className="test-actions">
-                <button
-                  className="btn btn-sm btn-blue"
-                  onClick={() => openContent(item)}
-                >
-                  {completed ? 'Review' : 'Start'}
-                </button>
-                {Array.isArray(item.chapters) && item.chapters.length > 0 && (
-                  <div style={{ marginTop: 8, color: '#64748b', fontSize: '0.9rem' }}>
-                    Complete each chapter quiz in order.
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {content.length === 0 && (
-        <div className="empty-state">
-          <div className="empty-title">No Study Content Available</div>
-          <div className="empty-subtitle">Check back later for new educational content</div>
-        </div>
-      )}
-
-      {/* Content Modal */}
-      {showContentModal && selectedContent && (
-        <div className="modal-overlay" onClick={() => setShowContentModal(false)}>
-          <div className="modal-content large-modal fullscreen-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>{selectedContent.title}</h3>
-              <button className="modal-close" onClick={() => setShowContentModal(false)}>×</button>
-            </div>
-            <div className="modal-body">
-              <div style={{ marginBottom: '20px' }}>
-                <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', marginBottom: '16px' }}>
-                  <span><strong>Type:</strong> {selectedContent.content_type}</span>
-                  <span><strong>Subject:</strong> {selectedContent.subject || 'N/A'}</span>
-                  <span><strong>Class:</strong> {selectedContent.class_level || 'N/A'}</span>
-                  <span><strong>Difficulty:</strong> {selectedContent.difficulty_level}</span>
-                </div>
-                <p>{selectedContent.description}</p>
-              </div>
-
-              {Array.isArray(selectedContent.chapters) && selectedContent.chapters.length > 0 ? (
-                <div>
-                  <div style={{ marginBottom: 20, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                    {selectedContent.chapters.map((chapter, index) => {
-                      const chapterCompleted = isChapterCompleted(selectedContent.id, index);
-                      const unlocked = index <= activeChapterIndex;
-                      return (
-                        <button
-                          key={index}
-                          type="button"
-                          className="btn btn-sm"
-                          disabled={!unlocked}
-                          onClick={() => setActiveChapterIndex(index)}
-                          style={{
-                            background: index === activeChapterIndex ? '#1d4ed8' : chapterCompleted ? '#10b981' : '#f3f4f6',
-                            color: index === activeChapterIndex || chapterCompleted ? '#fff' : '#0f172a',
-                            cursor: unlocked ? 'pointer' : 'not-allowed'
-                          }}
-                        >
-                          Chapter {index + 1}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div style={{ marginBottom: 12, color: '#64748b', fontSize: '0.95rem' }}>
-                    Complete the chapter quiz before moving to the next chapter.
-                  </div>
-                  <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 20 }}>
-                    <div style={{ marginBottom: 14, fontWeight: 700 }}>
-                      {selectedContent.chapters[activeChapterIndex].title || `Chapter ${activeChapterIndex + 1}`}
-                    </div>
-                    <div dangerouslySetInnerHTML={{ __html: selectedContent.chapters[activeChapterIndex].content || '<p>No chapter content available.</p>' }} />
-                  </div>
-                </div>
-              ) : (
-                <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '20px' }}>
-                  <div dangerouslySetInnerHTML={{ __html: selectedContent.content }} />
-                </div>
-              )}
-            </div>
-            <div className="modal-footer" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
-              {Array.isArray(selectedContent.chapters) && selectedContent.chapters.length > 0 ? (
-                <>
-                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <button
-                      className="btn btn-blue"
-                      onClick={() => startQuiz(selectedContent.id, activeChapterIndex)}
-                      disabled={isChapterCompleted(selectedContent.id, activeChapterIndex)}
-                    >
-                      {isChapterCompleted(selectedContent.id, activeChapterIndex) ? 'Chapter Completed' : 'Take Chapter Quiz'}
-                    </button>
-                    <span style={{ color: '#64748b' }}>
-                      {isChapterCompleted(selectedContent.id, activeChapterIndex) ? 'Quiz passed' : 'Quiz required'}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                    <button
-                      className="btn btn-secondary"
-                      onClick={() => setActiveChapterIndex((prev) => Math.max(prev - 1, 0))}
-                      disabled={activeChapterIndex === 0}
-                    >
-                      Previous Chapter
-                    </button>
-                    <button
-                      className="btn btn-green"
-                      onClick={() => setActiveChapterIndex((prev) => Math.min(prev + 1, selectedContent.chapters.length - 1))}
-                      disabled={!isChapterCompleted(selectedContent.id, activeChapterIndex) || activeChapterIndex === selectedContent.chapters.length - 1}
-                    >
-                      Next Chapter
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <button
-                  className="btn btn-blue"
-                  onClick={() => startQuiz(selectedContent.id)}
-                >
-                  Take Quiz
-                </button>
-              )}
-              <button
-                className="btn btn-secondary"
-                onClick={() => setShowContentModal(false)}
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Quiz Modal */}
-      {showQuiz && (
-        <div className="modal-overlay" onClick={() => { setShowQuiz(false); setQuestions([]); setQuizAnswers({}); setQuizSubmitted(false); setQuizScore(0); setQuizPassed(false); }}>
-          <div className="modal-content large-modal fullscreen-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>
-                Quiz: {selectedContent?.title}
-                {Array.isArray(selectedContent?.chapters) && selectedContent.chapters.length > 0 ? ` — Chapter ${activeChapterIndex + 1}` : ''}
-              </h3>
-              <button className="modal-close" onClick={() => { setShowQuiz(false); setQuestions([]); setQuizAnswers({}); setQuizSubmitted(false); setQuizScore(0); setQuizPassed(false); }}>×</button>
-            </div>
-            <div className="modal-body">
-              {!quizSubmitted ? (
-                <div>
-                  <div style={{ marginBottom: '20px' }}>
-                    <p>Answer the following questions to unlock the next chapter.</p>
-                  </div>
-
-                  {questions.length === 0 ? (
-                    <div style={{ color: '#7c3aed' }}>
-                      No quiz questions are available for this chapter. Please ask your instructor to add questions for this chapter.
-                    </div>
-                  ) : questions.map((question, index) => (
-                    <div key={question.id} style={{ marginBottom: '24px', padding: '16px', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
-                      <div style={{ fontWeight: 'bold', marginBottom: '12px' }}>
-                        Question {index + 1}: {question.question_text}
-                      </div>
-
-                      {question.question_type === 'multiple_choice' && question.study_answers && (
-                        <div>
-                          {question.study_answers.map((answer) => (
-                            <div key={answer.id} style={{ marginBottom: '8px' }}>
-                              <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <input
-                                  type="radio"
-                                  name={`question-${question.id}`}
-                                  value={answer.id}
-                                  checked={quizAnswers[question.id] === answer.id}
-                                  onChange={(e) => setQuizAnswers({...quizAnswers, [question.id]: e.target.value})}
-                                />
-                                <span>{String.fromCharCode(65 + answer.order_index)}. {answer.answer_text}</span>
-                              </label>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                      {question.question_type === 'true_false' && (
-                        <div>
-                          <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <input
-                              type="radio"
-                              name={`question-${question.id}`}
-                              value="true"
-                              checked={quizAnswers[question.id] === 'true'}
-                              onChange={(e) => setQuizAnswers({...quizAnswers, [question.id]: e.target.value})}
-                            />
-                            <span>True</span>
-                          </label>
-                          <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <input
-                              type="radio"
-                              name={`question-${question.id}`}
-                              value="false"
-                              checked={quizAnswers[question.id] === 'false'}
-                              onChange={(e) => setQuizAnswers({...quizAnswers, [question.id]: e.target.value})}
-                            />
-                            <span>False</span>
-                          </label>
-                        </div>
-                      )}
-
-                      {(question.question_type === 'short_answer' || question.question_type === 'essay') && (
-                        <textarea
-                          className="form-input"
-                          value={quizAnswers[question.id] || ''}
-                          onChange={(e) => setQuizAnswers({...quizAnswers, [question.id]: e.target.value})}
-                          placeholder="Enter your answer here..."
-                          rows={question.question_type === 'essay' ? 4 : 2}
-                        />
-                      )}
-
-                      <div style={{ fontSize: '0.9em', color: '#64748b', marginTop: '8px' }}>
-                        {question.points} point{question.points !== 1 ? 's' : ''}
-                      </div>
-                    </div>
-                  ))}
-
-                  <button
-                    className="btn btn-blue"
-                    onClick={submitQuiz}
-                    disabled={questions.length === 0 || Object.keys(quizAnswers).length < questions.length}
-                  >
-                    Submit Quiz
-                  </button>
-                </div>
-              ) : (
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '2em', marginBottom: '16px' }}>
-                    {quizPassed ? '🎉' : '📚'}
-                  </div>
-                  <h3>Quiz Completed!</h3>
-                  <div style={{ fontSize: '1.2em', margin: '16px 0' }}>
-                    Your Score: {quizScore} / {questions.reduce((sum, q) => sum + q.points, 0)} points
-                  </div>
-                  <div style={{ color: '#64748b', marginBottom: '24px' }}>
-                    {quizPassed
-                      ? 'Great job! You passed the quiz.'
-                      : 'Keep studying and try again!'}
-                  </div>
-
-                  {questions.map((question, index) => {
-                    const userAnswer = quizAnswers[question.id];
-                    let isCorrect = false;
-
-                    if (question.question_type === 'multiple_choice') {
-                      const correctAnswer = question.study_answers?.find(a => a.is_correct);
-                      isCorrect = correctAnswer && userAnswer === correctAnswer.id;
-                    } else if (question.question_type === 'true_false') {
-                      isCorrect = userAnswer === question.correct_answer;
-                    } else {
-                      isCorrect = Boolean(userAnswer && String(userAnswer).trim());
-                    }
-
-                    return (
-                      <div key={question.id} style={{
-                        marginBottom: '16px',
-                        padding: '12px',
-                        border: '1px solid #e2e8f0',
-                        borderRadius: '8px',
-                        background: isCorrect ? '#f0fdf4' : '#fef2f2'
-                      }}>
-                        <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>
-                          Question {index + 1}: {question.question_text}
-                        </div>
-                        <div style={{ color: isCorrect ? '#166534' : '#dc2626' }}>
-                          Your answer: {
-                            question.question_type === 'multiple_choice'
-                              ? question.study_answers?.find(a => a.id === userAnswer)?.answer_text || 'Not answered'
-                              : userAnswer || 'Not answered'
-                          }
-                        </div>
-                        {!isCorrect && question.explanation && (
-                          <div style={{ marginTop: '8px', padding: '8px', background: '#f9fafb', borderRadius: '4px' }}>
-                            <strong>Explanation:</strong> {question.explanation}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-
-                  <button
-                    className="btn btn-blue"
-                    onClick={() => { setShowQuiz(false); setQuestions([]); setQuizAnswers({}); setQuizSubmitted(false); setQuizScore(0); setQuizPassed(false); }}
-                  >
-                    Close
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
+const StudentStudyContentPage = lazy(() =>
+  import("./src/components/StudentStudyContentPage.jsx"),
+);
 function StudentStudyGroupsPage({ user, studentData }) {
   const [groups, setGroups] = useState([]);
   const [myGroups, setMyGroups] = useState([]);
@@ -21933,140 +22157,35 @@ const STUDENT_NAV = [
   { key: "dashboard", icon: "dashboard", label: "Dashboard", color: "#6366f1" },
   { key: "profile", icon: "profile", label: "Profile", color: "#3b82f6" },
   { section: "Academics" },
-  { key: "results", icon: "analytics", label: "Results & Analytics", color: "#f97316" },
-  {
-    key: "report-card",
-    icon: "results",
-    label: "Report Card",
-    color: "#7c3aed",
-  },
-  {
-    key: "study-planner",
-    icon: "calendar",
-    label: "Study Planner",
-    color: "#0f766e",
-  },
-  {
-    key: "exam-schedule",
-    icon: "events",
-    label: "Exam Schedule",
-    color: "#0369a1",
-  },
-  {
-    key: "live-tests",
-    icon: "quiz",
-    label: "Live Tests",
-    color: "#f59e0b",
-  },
-  {
-    key: "study-content",
-    icon: "docs",
-    label: "Study Content",
-    color: "#10b981",
-  },
-  {
-    key: "study-groups",
-    icon: "groups",
-    label: "Study Groups",
-    color: "#ec4899",
-  },
-  { key: "goals", icon: "grading", label: "Goals", color: "#8b5cf6" },
+  { key: "results", icon: "analytics", label: "Results", color: "#f97316" },
+  { key: "report-card", icon: "results", label: "Report Card", color: "#7c3aed" },
+  { key: "exam-schedule", icon: "events", label: "Exam Schedule", color: "#0369a1" },
+  { key: "live-tests", icon: "quiz", label: "Quizzes & Tests", color: "#f59e0b" },
+  { key: "study-content", icon: "docs", label: "Study Materials", color: "#10b981" },
   { section: "Mock Placement" },
-  {
-    key: "selection",
-    icon: "selection",
-    label: "Select Schools",
-    color: "#06b6d4",
-  },
-  {
-    key: "my-selection",
-    icon: "confirmed",
-    label: "My Selection",
-    color: "#16a34a",
-  },
-  { key: "predictor", icon: "analytics", label: "Predictor", color: "#7c3aed" },
-  {
-    key: "scholarships",
-    icon: "teachers",
-    label: "Scholarships",
-    color: "#d97706",
-  },
+  { key: "selection", icon: "selection", label: "Select Schools", color: "#06b6d4" },
+  { key: "my-selection", icon: "confirmed", label: "My Selection", color: "#16a34a" },
   { section: "Student Services" },
-  {
-    key: "attendance",
-    icon: "attendance",
-    label: "Attendance",
-    color: "#14b8a6",
-  },
-  {
-    key: "attendance-corrections",
-    icon: "attendance",
-    label: "Attendance Corrections",
-    color: "#b45309",
-  },
+  { key: "attendance", icon: "attendance", label: "Attendance", color: "#14b8a6" },
   { key: "fees", icon: "fees", label: "Fees", color: "#22c55e" },
   { key: "pay-fees", icon: "fees", label: "Pay Fees", color: "#15803d" },
-  {
-    key: "payment-plan",
-    icon: "finance",
-    label: "Payment Plan",
-    color: "#166534",
-  },
   { section: "Communication & Resources" },
-  { key: "announcements", icon: "bell", label: "Updates", color: "#ef4444" },
-  {
-    key: "announcements-pro",
-    icon: "bell",
-    label: "Personalized Updates",
-    color: "#dc2626",
-  },
-  {
-    key: "support-tickets",
-    icon: "support",
-    label: "Support Tickets",
-    color: "#0f766e",
-  },
+  { key: "announcements", icon: "bell", label: "Announcements", color: "#ef4444" },
+  { key: "support-tickets", icon: "support", label: "Support", color: "#0f766e" },
   { key: "chat", icon: "chat", label: "Chat", color: "#10b981" },
   { key: "docs", icon: "docs", label: "Documents", color: "#f97316" },
-  {
-    key: "upload-docs",
-    icon: "enroll",
-    label: "Upload Documents",
-    color: "#7c2d12",
-  },
-  { key: "resources", icon: "docs", label: "Resources", color: "#475569" },
+  { key: "upload-docs", icon: "enroll", label: "Upload Documents", color: "#7c2d12" },
   { key: "assignments", icon: "docs", label: "Assignments", color: "#1d4ed8" },
-  {
-    key: "calendar-sync",
-    icon: "events",
-    label: "Calendar Sync",
-    color: "#1e40af",
-  },
-  { section: "Virtual Learning" },
-  { key: "learning-resources", icon: "docs", label: "Learning Resources", color: "#7c3aed" },
-  { key: "virtual-classroom", icon: "schools", label: "Virtual Classroom", color: "#7c3aed" },
-  { key: "course-marketplace", icon: "finance", label: "Course Marketplace", color: "#f59e0b" },
-  { key: "live-streaming", icon: "events", label: "Live Streaming", color: "#ef4444" },
-  { key: "video-conferencing", icon: "profile", label: "Video Conferencing", color: "#8b5cf6" },
-  { key: "gamification", icon: "support", label: "Gamification", color: "#f97316" },
-  { key: "adaptive-learning", icon: "chat", label: "Adaptive Learning", color: "#0ea5e9" },
-  { key: "collaborative-projects", icon: "students", label: "Collaborative Projects", color: "#22c55e" },
-  { key: "mobile-learning", icon: "profile", label: "Mobile Learning", color: "#d97706" },
-  { key: "ai-tutor", icon: "chat", label: "AI Tutor", color: "#7c2d12" },
+  { key: "resources", icon: "docs", label: "Resources", color: "#475569" },
 ];
 
 const STUDENT_SUBPAGE_MAP = {
-  results: [
-    "report-card",
-    "study-planner",
-    "exam-schedule",
-    "goals",
-  ],
-  selection: ["my-selection", "predictor", "scholarships"],
-  attendance: ["attendance-corrections"],
-  fees: ["pay-fees", "payment-plan"],
-  announcements: ["announcements-pro", "support-tickets", "chat"],
-  docs: ["upload-docs", "resources", "assignments", "calendar-sync"],
+  results: ["report-card", "exam-schedule"],
+  selection: ["my-selection"],
+  fees: ["pay-fees"],
+  announcements: ["support-tickets", "chat"],
+  docs: ["upload-docs"],
+  "study-content": ["assignments", "resources"],
 };
 
 // ADMIN PORTAL
@@ -22086,7 +22205,7 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
     Object.fromEntries(Object.keys(ADMIN_SUBPAGE_MAP).map((k) => [k, false])),
   );
   const [tab, setTab] = useState(() =>
-    readStoredTab(ADMIN_TAB_KEY, "dashboard"),
+    readAvailableTab(ADMIN_TAB_KEY, ADMIN_NAV),
   );
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notificationCount, setNotificationCount] = useState(0);
@@ -22154,16 +22273,8 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
   const SUPER_ADMIN_ONLY_KEYS = useMemo(() => 
     new Set([
       "registered-schools",
-      "school-register",
       "permissions",
       "audit",
-      "privacy",
-      "recovery",
-      "integrations",
-      "tenants",
-      "flags",
-      "auto-rules",
-      "sla"
     ]),
     []
   );
@@ -22189,7 +22300,7 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
   const BOTTOM = useMemo(
     () =>
       getPriorityBottomKeys(
-        ["dashboard", "students", "live-tests", "study-content", "settings"],
+        ["dashboard", "students", "schools", "pending", "settings"],
         filteredAdminNav,
         new Set([...blockedAdminFeeKeys, ...(isSuperAdminUser ? [] : Array.from(SUPER_ADMIN_ONLY_KEYS))]),
       ),
@@ -22984,7 +23095,11 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
           tableInfo={databaseTables.scores}
         />
       ),
-      "academic-scores": <AcademicScores />,
+      "academic-scores": (
+        <Suspense fallback={<div className="portal-loading" role="status">Loading academic scores...</div>}>
+          <AcademicScores />
+        </Suspense>
+      ),
       analytics: (
         <AnalyticsPage
           studentsData={adminStudents}
@@ -22999,35 +23114,13 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
           tableInfo={databaseTables.results}
         />
       ),
-      "live-tests": <LiveTestsPage currentUser={user} />,
       "study-content": <StudyContentPage currentUser={user} />,
       grading: <GradingPage />,
-      attendance: (
-        <AttendancePage
-          studentsData={adminStudents}
-          tableInfo={databaseTables.attendance}
-        />
-      ),
       fees: (
         <FeesAdmin
           studentsData={adminStudents}
           feesData={feesData}
           tableInfo={databaseTables.fees}
-        />
-      ),
-      teachers: (
-        <TeachersPage
-          teachersData={teachersData}
-          tableInfo={databaseTables.teachers}
-          onCreateTeacher={(draft) => saveAdminTeacher(null, draft)}
-          onUpdateTeacher={saveAdminTeacher}
-          currentUser={user}
-        />
-      ),
-      events: (
-        <EventsPage
-          eventsData={databaseTables.events?.rows}
-          tableInfo={databaseTables.events}
         />
       ),
       schools: <SchoolsPage schoolsData={adminSchools} />,
@@ -23069,184 +23162,22 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
         />
       ),
       chat: <ChatPage chatUsers={chatUsers} onChatUsersChange={setChatUsers} />,
+      documents: <DocumentWorkflowPage />,
       settings: <SettingsPage />,
       permissions: <PermissionsMatrixPage currentUser={user} />,
       audit: <AuditTrailPage />,
-      notify: <NotificationCenterPage />,
       payments: <PaymentsReceiptsPage />,
-      documents: <DocumentWorkflowPage />,
       reports: <ReportsExportsPage />,
-      insights: <AdvancedAnalyticsPage />,
-      bulk: <BulkOperationsPage />,
-      offline: <OfflineSyncPage />,
-      calendar: <AcademicCalendarPage />,
-      helpdesk: <HelpdeskPage />,
-      privacy: <PrivacyCompliancePage />,
-      recovery: <DisasterRecoveryPage />,
-      mobile: <MobilePwaPage />,
-      "auto-rules": <AutomationRulesPage />,
-      "ai-assist": <AiAssistantPage />,
-      "risk-score": <StudentRiskPage />,
-      timetable: <TimetablePage />,
-      "exam-builder": <ExamBuilderPage />,
-      installments: <InstallmentPlansPage />,
-      campaigns: <MessagingCampaignsPage />,
-      recommend: <RecommendationEnginePage />,
-      "digital-id": <DigitalIdPage />,
-      "public-status": <PublicStatusPage />,
-      integrations: <IntegrationsPage />,
-      tenants: <MultiTenantPage />,
-      quality: <DataQualityPage />,
-      sla: <ApprovalSlaPage />,
-      flags: <FeatureFlagsPage />,
-      "peer-tutoring": <PeerTutoringPage />,
-      counseling: <MentalHealthPortal currentUser={user} />,
-      library: <LibraryManagementPage />,
-      alumni: <AlumniPortalPage />,
-      scholarships: <ScholarshipManagementPage />,
-      conferences: <ParentTeacherConferencePage />,
-      medical: <MedicalRecordsPage />,
-      transport: <TransportHostelPage />,
-      "virtual-classroom": <VirtualClassroomPage />,
-      "course-marketplace": <CourseMarketplacePage />,
-      "live-streaming": <LiveStreamingPage />,
-      "interactive-whiteboard": <InteractiveWhiteboardPage />,
-      "video-conferencing": <VideoConferencingPage />,
-      "learning-analytics": <LearningAnalyticsPage />,
-      gamification: <GamificationPage />,
-      "adaptive-learning": <AdaptiveLearningPage />,
-      "collaborative-projects": <CollaborativeProjectsPage />,
-      "mobile-learning": <MobileLearningPage />,
-      "ai-tutor": <AITutorPage />,
       "super-admin-control": (
         <div className="card card-padded">
           <div style={{ marginBottom: 24 }}>
-            <h2 style={{ fontSize: "1.5em", marginBottom: 8 }}>🔒 Super Admin Control Center</h2>
-            <p style={{ color: "#64748b" }}>Manage all system features, permissions, and admin access</p>
+            <h2 style={{ fontSize: "1.5em", marginBottom: 8 }}>Super Admin</h2>
+            <p style={{ color: "#64748b" }}>Manage administrator access and registered schools.</p>
           </div>
-          
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16, marginBottom: 24 }}>
-            {/* Feature Access Control */}
-            <div className="card" style={{ padding: 16, border: "1px solid #e2e8f0" }}>
-              <h3 style={{ fontWeight: 700, marginBottom: 12 }}>📋 Feature Access Control</h3>
-              <p style={{ fontSize: ".9em", color: "#64748b", marginBottom: 12 }}>
-                Control which features are available to different admin roles
-              </p>
-              <button className="btn btn-blue" style={{ width: "100%" }} onClick={() => goTab("permissions")}>
-                Manage Permissions
-              </button>
-            </div>
-
-            {/* Registered Schools Management */}
-            <div className="card" style={{ padding: 16, border: "1px solid #e2e8f0" }}>
-              <h3 style={{ fontWeight: 700, marginBottom: 12 }}>🏫 Registered Schools</h3>
-              <p style={{ fontSize: ".9em", color: "#64748b", marginBottom: 12 }}>
-                Register and manage schools across the platform
-              </p>
-              <button className="btn btn-blue" style={{ width: "100%" }} onClick={() => goTab("registered-schools")}>
-                View Schools
-              </button>
-            </div>
-
-            {/* Audit Trail */}
-            <div className="card" style={{ padding: 16, border: "1px solid #e2e8f0" }}>
-              <h3 style={{ fontWeight: 700, marginBottom: 12 }}>📊 Audit Trail</h3>
-              <p style={{ fontSize: ".9em", color: "#64748b", marginBottom: 12 }}>
-                Review all system activities and changes
-              </p>
-              <button className="btn btn-blue" style={{ width: "100%" }} onClick={() => goTab("audit")}>
-                View Audit Trail
-              </button>
-            </div>
-
-            {/* Data Privacy & Compliance */}
-            <div className="card" style={{ padding: 16, border: "1px solid #e2e8f0" }}>
-              <h3 style={{ fontWeight: 700, marginBottom: 12 }}>🔐 Privacy & Compliance</h3>
-              <p style={{ fontSize: ".9em", color: "#64748b", marginBottom: 12 }}>
-                Manage data privacy policies and compliance settings
-              </p>
-              <button className="btn btn-blue" style={{ width: "100%" }} onClick={() => goTab("privacy")}>
-                Privacy Settings
-              </button>
-            </div>
-
-            {/* System Recovery */}
-            <div className="card" style={{ padding: 16, border: "1px solid #e2e8f0" }}>
-              <h3 style={{ fontWeight: 700, marginBottom: 12 }}>🔄 Disaster Recovery</h3>
-              <p style={{ fontSize: ".9em", color: "#64748b", marginBottom: 12 }}>
-                Backup and recovery management
-              </p>
-              <button className="btn btn-blue" style={{ width: "100%" }} onClick={() => goTab("recovery")}>
-                Recovery Options
-              </button>
-            </div>
-
-            {/* Integration Management */}
-            <div className="card" style={{ padding: 16, border: "1px solid #e2e8f0" }}>
-              <h3 style={{ fontWeight: 700, marginBottom: 12 }}>🔌 Integrations</h3>
-              <p style={{ fontSize: ".9em", color: "#64748b", marginBottom: 12 }}>
-                Manage third-party service integrations
-              </p>
-              <button className="btn btn-blue" style={{ width: "100%" }} onClick={() => goTab("integrations")}>
-                Manage Integrations
-              </button>
-            </div>
-
-            {/* Feature Flags */}
-            <div className="card" style={{ padding: 16, border: "1px solid #e2e8f0" }}>
-              <h3 style={{ fontWeight: 700, marginBottom: 12 }}>🚩 Feature Flags</h3>
-              <p style={{ fontSize: ".9em", color: "#64748b", marginBottom: 12 }}>
-                Toggle features on/off across the system
-              </p>
-              <button className="btn btn-blue" style={{ width: "100%" }} onClick={() => goTab("flags")}>
-                Feature Flags
-              </button>
-            </div>
-
-            {/* Automation Rules */}
-            <div className="card" style={{ padding: 16, border: "1px solid #e2e8f0" }}>
-              <h3 style={{ fontWeight: 700, marginBottom: 12 }}>⚙️ Automation Rules</h3>
-              <p style={{ fontSize: ".9em", color: "#64748b", marginBottom: 12 }}>
-                Create and manage system automation rules
-              </p>
-              <button className="btn btn-blue" style={{ width: "100%" }} onClick={() => goTab("auto-rules")}>
-                Automation Rules
-              </button>
-            </div>
-
-            {/* Multi-Tenant Management */}
-            <div className="card" style={{ padding: 16, border: "1px solid #e2e8f0" }}>
-              <h3 style={{ fontWeight: 700, marginBottom: 12 }}>🏢 Multi-Tenant</h3>
-              <p style={{ fontSize: ".9em", color: "#64748b", marginBottom: 12 }}>
-                Manage multiple tenant instances
-              </p>
-              <button className="btn btn-blue" style={{ width: "100%" }} onClick={() => goTab("tenants")}>
-                Tenant Settings
-              </button>
-            </div>
-
-            {/* Approval SLA */}
-            <div className="card" style={{ padding: 16, border: "1px solid #e2e8f0" }}>
-              <h3 style={{ fontWeight: 700, marginBottom: 12 }}>⏱️ Approval SLA</h3>
-              <p style={{ fontSize: ".9em", color: "#64748b", marginBottom: 12 }}>
-                Set SLA targets for approvals
-              </p>
-              <button className="btn btn-blue" style={{ width: "100%" }} onClick={() => goTab("sla")}>
-                SLA Settings
-              </button>
-            </div>
-          </div>
-
-          <div className="card" style={{ padding: 16, background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8 }}>
-            <h4 style={{ fontWeight: 700, marginBottom: 8, color: "#dc2626" }}>⚠️ Super Admin Responsibilities</h4>
-            <ul style={{ margin: 0, paddingLeft: 20, color: "#64748b", fontSize: ".9em", lineHeight: 1.6 }}>
-              <li>Ensure only trusted users have super admin access</li>
-              <li>Monitor audit trails regularly for unusual activities</li>
-              <li>Keep disaster recovery plans updated</li>
-              <li>Review and update privacy policies periodically</li>
-              <li>Test integrations thoroughly before production deployment</li>
-              <li>Document all critical system changes</li>
-            </ul>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 16 }}>
+            <button className="btn btn-blue" onClick={() => goTab("permissions")}>Manage Permissions</button>
+            <button className="btn btn-blue" onClick={() => goTab("registered-schools")}>Registered Schools</button>
+            <button className="btn btn-blue" onClick={() => goTab("audit")}>View Audit Trail</button>
           </div>
         </div>
       ),
@@ -23394,7 +23325,9 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
               );
             if (childToParent[item.key]) return null;
 
-            const childrenKeys = ADMIN_SUBPAGE_MAP[item.key] || [];
+            const childrenKeys = (ADMIN_SUBPAGE_MAP[item.key] || []).filter(
+              (key) => filteredAdminNav.some((navItem) => navItem.key === key),
+            );
             const hasChildren = childrenKeys.length > 0;
             const activeParent = tab === item.key || childrenKeys.includes(tab);
 
@@ -23547,7 +23480,7 @@ function SchoolAdminPortal({ user, onLogout, darkMode, onToggleDark }) {
     ),
   );
   const [tab, setTab] = useState(() =>
-    readStoredTab(SCHOOL_ADMIN_TAB_KEY, "dashboard"),
+    readAvailableTab(SCHOOL_ADMIN_TAB_KEY, SCHOOL_ADMIN_NAV),
   );
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notificationCount, setNotificationCount] = useState(0);
@@ -24321,29 +24254,12 @@ function SchoolAdminPortal({ user, onLogout, darkMode, onToggleDark }) {
           scoreTableInfo={schoolScoresInfo}
         />
       ),
-      attendance: (
-        <AttendancePage
-          studentsData={schoolStudents}
-          tableInfo={schoolTableInfo.attendance}
-          registeredSchoolId={school?.id || null}
-        />
-      ),
       fees: (
         <FeesAdmin
           studentsData={schoolStudents}
           feesData={schoolFeesData}
           tableInfo={schoolTableInfo.fees}
           registeredSchoolId={school?.id ?? null}
-        />
-      ),
-      teachers: (
-        <TeachersPage
-          teachersData={schoolTeachers}
-          tableInfo={schoolTableInfo.teachers}
-          onCreateTeacher={(draft) => saveSchoolTeacher(null, draft)}
-          onUpdateTeacher={saveSchoolTeacher}
-          currentUser={user}
-          emptyRemoteMessage="No teachers are currently linked to this school. If teacher records already exist in Supabase, they may still be missing registered_school_id and need to be re-saved from this school workspace or backfilled in Supabase."
         />
       ),
       schools: <SchoolsPage schoolsData={schoolChoiceSchools} />,
@@ -24354,13 +24270,6 @@ function SchoolAdminPortal({ user, onLogout, darkMode, onToggleDark }) {
         />
       ),
       grading: <GradingPage />,
-      events: (
-        <EventsPage
-          eventsData={schoolEventsInfo.rows}
-          tableInfo={schoolTableInfo.events}
-          registeredSchoolId={school?.id || null}
-        />
-      ),
       finance: (
         <FinancePage
           financeSummary={schoolFinanceSummary}
@@ -24393,25 +24302,9 @@ function SchoolAdminPortal({ user, onLogout, darkMode, onToggleDark }) {
         />
       ),
       chat: <ChatPage chatUsers={chatUsers} onChatUsersChange={setChatUsers} />,
-      notify: <NotificationCenterPage />,
       payments: <PaymentsReceiptsPage />,
       documents: <DocumentWorkflowPage />,
       reports: <ReportsExportsPage />,
-      insights: <AdvancedAnalyticsPage />,
-      bulk: <BulkOperationsPage />,
-      offline: <OfflineSyncPage />,
-      calendar: <AcademicCalendarPage />,
-      helpdesk: <HelpdeskPage />,
-      "ai-assist": <AiAssistantPage />,
-      "risk-score": <StudentRiskPage />,
-      timetable: <TimetablePage />,
-      "exam-builder": <ExamBuilderPage />,
-      installments: <InstallmentPlansPage />,
-      campaigns: <MessagingCampaignsPage />,
-      recommend: <RecommendationEnginePage />,
-      "digital-id": <DigitalIdPage />,
-      "public-status": <PublicStatusPage />,
-      quality: <DataQualityPage />,
     };
     return pages[tab] || pages.dashboard;
   };
@@ -24467,7 +24360,9 @@ function SchoolAdminPortal({ user, onLogout, darkMode, onToggleDark }) {
               );
             if (childToParent[item.key]) return null;
 
-            const childrenKeys = SCHOOL_ADMIN_SUBPAGE_MAP[item.key] || [];
+            const childrenKeys = (SCHOOL_ADMIN_SUBPAGE_MAP[item.key] || []).filter(
+              (key) => filteredSchoolAdminNav.some((navItem) => navItem.key === key),
+            );
             const hasChildren = childrenKeys.length > 0;
             const activeParent = tab === item.key || childrenKeys.includes(tab);
 
@@ -25083,38 +24978,10 @@ function StudentLiveTestsPage({ user, studentData }) {
 // STUDENT PORTAL
 function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
   const { cfg: appCfg } = useContext(SettingsContext);
-  const studentDashboardEnabled = appCfg.studentDashboardEnabled !== false;
-  const studentProfileEnabled = appCfg.studentProfileEnabled !== false;
-  const studentResultsEnabled = appCfg.studentResultsEnabled !== false;
-  const studentAnalyticsEnabled = appCfg.studentAnalyticsEnabled !== false;
-  const studentReportCardEnabled = appCfg.studentReportCardEnabled !== false;
-  const studentStudyPlannerEnabled = appCfg.studentStudyPlannerEnabled !== false;
-  const studentExamScheduleEnabled = appCfg.studentExamScheduleEnabled !== false;
-  const studentLiveTestsEnabled = appCfg.studentLiveTestsEnabled !== false;
-  const studentGoalsEnabled = appCfg.studentGoalsEnabled !== false;
-  const studentAttendanceEnabled = appCfg.studentAttendanceEnabled !== false;
-  const studentAttendanceCorrectionsEnabled =
-    appCfg.studentAttendanceCorrectionsEnabled !== false;
-  const studentAnnouncementsEnabled =
-    appCfg.studentAnnouncementsEnabled !== false;
-  const studentAnnouncementsProEnabled =
-    appCfg.studentAnnouncementsProEnabled !== false;
-  const studentSupportTicketsEnabled =
-    appCfg.studentSupportTicketsEnabled !== false;
-  const studentChatEnabled = appCfg.studentChatEnabled !== false;
-  const studentDocsEnabled = appCfg.studentDocsEnabled !== false;
-  const studentUploadDocsEnabled = appCfg.studentUploadDocsEnabled !== false;
-  const studentResourcesEnabled = appCfg.studentResourcesEnabled !== false;
-  const studentAssignmentsEnabled = appCfg.studentAssignmentsEnabled !== false;
-  const studentCalendarSyncEnabled =
-    appCfg.studentCalendarSyncEnabled !== false;
-  const studentFeesPortalEnabled = appCfg.studentFeesPortalEnabled !== false;
-  const studentSelectionPortalEnabled =
-    appCfg.studentSelectionPortalEnabled !== false;
-  const studentSelectSchoolsEnabled =
-    appCfg.studentSelectSchoolsEnabled !== false;
-  const studentMySelectionEnabled =
-    appCfg.studentMySelectionEnabled !== false;
+  const studentNavVisibility = useMemo(
+    () => getStudentNavVisibility(appCfg),
+    [appCfg],
+  );
   const childToParent = useMemo(() => {
     const map = {};
     Object.entries(STUDENT_SUBPAGE_MAP).forEach(([parent, children]) => {
@@ -25128,7 +24995,7 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
     Object.fromEntries(Object.keys(STUDENT_SUBPAGE_MAP).map((k) => [k, false])),
   );
   const [tab, setTab] = useState(() =>
-    readStoredTab(STUDENT_TAB_KEY, "dashboard"),
+    readAvailableTab(STUDENT_TAB_KEY, STUDENT_NAV),
   );
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notificationCount, setNotificationCount] = useState(0);
@@ -25139,6 +25006,7 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
   const [studentDataError, setStudentDataError] = useState("");
   const [selectionRow, setSelectionRow] = useState(null);
   const [scoreValues, setScoreValues] = useState([]);
+  const [scoreRecords, setScoreRecords] = useState([]);
   const [chatUsers, setChatUsers] = useState([
     { id: 1, name: "Support Team", avatar: "S", unread: 0, status: "active" },
     { id: 2, name: "Ms. Ama Owusu", avatar: "A", unread: 0, status: "online" },
@@ -25166,82 +25034,20 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
   const totalChatUnread = chatUsers.reduce((sum, u) => sum + u.unread, 0);
   const blockedStudentNavKeys = useMemo(() => {
     const blocked = [];
-    const resultsGroupVisible =
-      studentResultsEnabled ||
-      studentAnalyticsEnabled ||
-      studentReportCardEnabled ||
-      studentStudyPlannerEnabled ||
-      studentExamScheduleEnabled ||
-      studentGoalsEnabled;
-    const selectionGroupVisible =
-      studentSelectSchoolsEnabled ||
-      studentMySelectionEnabled ||
-      studentSelectionPortalEnabled;
-    const attendanceGroupVisible =
-      studentAttendanceEnabled || studentAttendanceCorrectionsEnabled;
-    const announcementsGroupVisible =
-      studentAnnouncementsEnabled ||
-      studentAnnouncementsProEnabled ||
-      studentSupportTicketsEnabled;
-    const docsGroupVisible =
-      studentDocsEnabled ||
-      studentUploadDocsEnabled ||
-      studentResourcesEnabled ||
-      studentAssignmentsEnabled ||
-      studentCalendarSyncEnabled;
-
-    if (!studentDashboardEnabled) blocked.push("dashboard");
-    if (!studentProfileEnabled) blocked.push("profile");
-    if (!resultsGroupVisible) blocked.push("results");
-    if (!studentReportCardEnabled) blocked.push("report-card");
-    if (!studentStudyPlannerEnabled) blocked.push("study-planner");
-    if (!studentExamScheduleEnabled) blocked.push("exam-schedule");
-    if (!studentLiveTestsEnabled) blocked.push("live-tests");
-    if (!studentGoalsEnabled) blocked.push("goals");
-    if (!selectionGroupVisible) blocked.push("selection");
-    if (!studentMySelectionEnabled) blocked.push("my-selection");
-    if (!studentSelectionPortalEnabled) {
-      blocked.push("predictor", "scholarships");
+    for (const item of STUDENT_NAV) {
+      if (!item.section && studentNavVisibility[item.key] === false) {
+        blocked.push(item.key);
+      }
     }
-    if (!attendanceGroupVisible) blocked.push("attendance");
-    if (!studentAttendanceCorrectionsEnabled)
-      blocked.push("attendance-corrections");
-    if (!studentFeesPortalEnabled) blocked.push("fees");
-    if (!studentFeesPortalEnabled) blocked.push("pay-fees", "payment-plan");
-    if (!announcementsGroupVisible) blocked.push("announcements");
-    if (!studentAnnouncementsProEnabled) blocked.push("announcements-pro");
-    if (!studentSupportTicketsEnabled) blocked.push("support-tickets");
-    if (!studentChatEnabled) blocked.push("chat");
-    if (!docsGroupVisible) blocked.push("docs");
-    if (!studentUploadDocsEnabled) blocked.push("upload-docs");
-    if (!studentResourcesEnabled) blocked.push("resources");
-    if (!studentAssignmentsEnabled) blocked.push("assignments");
-    if (!studentCalendarSyncEnabled) blocked.push("calendar-sync");
+    for (const [parent, children] of Object.entries(STUDENT_SUBPAGE_MAP)) {
+      if (blocked.includes(parent)) {
+        blocked.push(...children);
+      } else if (children.every((child) => blocked.includes(child))) {
+        blocked.push(parent);
+      }
+    }
     return blocked;
-  }, [
-    studentAnalyticsEnabled,
-    studentAnnouncementsEnabled,
-    studentAnnouncementsProEnabled,
-    studentAssignmentsEnabled,
-    studentAttendanceCorrectionsEnabled,
-    studentAttendanceEnabled,
-    studentCalendarSyncEnabled,
-    studentChatEnabled,
-    studentDashboardEnabled,
-    studentDocsEnabled,
-    studentExamScheduleEnabled,
-    studentFeesPortalEnabled,
-    studentGoalsEnabled,
-    studentLiveTestsEnabled,
-    studentMySelectionEnabled,
-    studentProfileEnabled,
-    studentReportCardEnabled,
-    studentResourcesEnabled,
-    studentResultsEnabled,
-    studentSelectSchoolsEnabled,
-    studentSelectionPortalEnabled,
-    studentStudyPlannerEnabled,
-  ]);
+  }, [studentNavVisibility]);
   const filteredStudentNav = useMemo(
     () =>
       STUDENT_NAV.filter((item) =>
@@ -25252,7 +25058,7 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
   const BOTTOM = useMemo(
     () =>
       getPriorityBottomKeys(
-        ["dashboard", "study-content", "study-groups", "live-tests", "results", "fees"],
+        ["dashboard", "study-content", "live-tests", "results", "fees"],
         filteredStudentNav,
         new Set(blockedStudentNavKeys),
       ),
@@ -25298,71 +25104,9 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
     selectionNoticeKey,
   ]);
 
-  const resolveStudentGroupTab = useCallback(
-    (key) => {
-      if (key === "results" && !studentResultsEnabled) {
-        return [
-          "report-card",
-          "study-planner",
-          "exam-schedule",
-          "goals",
-        ].find((childKey) => !blockedStudentNavKeys.includes(childKey)) || "dashboard";
-      }
-      if (key === "selection" && !studentSelectSchoolsEnabled) {
-        return ["my-selection", "predictor", "scholarships"].find(
-          (childKey) => !blockedStudentNavKeys.includes(childKey),
-        ) || "dashboard";
-      }
-      if (key === "attendance" && !studentAttendanceEnabled) {
-        return !blockedStudentNavKeys.includes("attendance-corrections")
-          ? "attendance-corrections"
-          : "dashboard";
-      }
-      if (key === "fees" && !studentFeesPortalEnabled) {
-        return !blockedStudentNavKeys.includes("pay-fees")
-          ? "pay-fees"
-          : !blockedStudentNavKeys.includes("payment-plan")
-          ? "payment-plan"
-          : !blockedStudentNavKeys.includes("results")
-          ? "results"
-          : "dashboard";
-      }
-      if (key === "announcements" && !studentAnnouncementsEnabled) {
-        return !blockedStudentNavKeys.includes("announcements-pro")
-          ? "announcements-pro"
-          : !blockedStudentNavKeys.includes("support-tickets")
-          ? "support-tickets"
-          : "dashboard";
-      }
-      if (key === "docs" && !studentDocsEnabled) {
-        return !blockedStudentNavKeys.includes("upload-docs")
-          ? "upload-docs"
-          : !blockedStudentNavKeys.includes("resources")
-          ? "resources"
-          : !blockedStudentNavKeys.includes("assignments")
-          ? "assignments"
-          : !blockedStudentNavKeys.includes("calendar-sync")
-          ? "calendar-sync"
-          : "dashboard";
-      }
-      return key;
-    },
-    [
-      blockedStudentNavKeys,
-      studentAnnouncementsEnabled,
-      studentAttendanceCorrectionsEnabled,
-      studentAttendanceEnabled,
-      studentDocsEnabled,
-      studentFeesPortalEnabled,
-      studentResultsEnabled,
-      studentSelectSchoolsEnabled,
-    ],
-  );
-
   const goTab = (key, closeSidebar = true) => {
-    const resolvedKey = resolveStudentGroupTab(key);
-    setTab(resolvedKey);
-    writeStoredTab(STUDENT_TAB_KEY, resolvedKey);
+    setTab(key);
+    writeStoredTab(STUDENT_TAB_KEY, key);
     if (closeSidebar) setSidebarOpen(false);
   };
   const reloadApp = () => window.location.reload();
@@ -25374,40 +25118,18 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
     }
   }, [tab, childToParent]);
   useEffect(() => {
-    if (!blockedStudentNavKeys.includes(tab)) {
-      const groupTabRedirects = [
-        "results",
-        "selection",
-        "attendance",
-        "fees",
-        "announcements",
-        "docs",
-      ];
-
-      if (groupTabRedirects.includes(tab)) {
-        const resolved = resolveStudentGroupTab(tab);
-        if (resolved !== tab) {
-          setTab(resolved);
-          writeStoredTab(STUDENT_TAB_KEY, resolved);
-        }
-      }
-      return;
-    }
+    if (!blockedStudentNavKeys.includes(tab)) return;
 
     const firstVisibleTab = STUDENT_NAV.find(
       (item) => !item.section && !blockedStudentNavKeys.includes(item.key),
     )?.key;
-    const resolved = resolveStudentGroupTab(tab);
-    const nextTab =
-      resolved && !blockedStudentNavKeys.includes(resolved)
-        ? resolved
-        : firstVisibleTab || "dashboard";
+    const nextTab = firstVisibleTab || "dashboard";
 
     if (nextTab !== tab) {
       setTab(nextTab);
       writeStoredTab(STUDENT_TAB_KEY, nextTab);
     }
-  }, [blockedStudentNavKeys, resolveStudentGroupTab, tab]);
+  }, [blockedStudentNavKeys, tab]);
 
   useEffect(() => {
     const loadStudentPortalData = async () => {
@@ -25416,6 +25138,7 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
       setAttendanceData([]);
       setFeesData([]);
       setScoreValues([]);
+      setScoreRecords([]);
       setSelectionRow(null);
       if (!supabase) {
         setStudentDataError("Supabase is not configured; student records cannot be loaded.");
@@ -25469,6 +25192,29 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
         status: student.status || "",
       });
 
+      const studentIndex = String(
+        student.index_number || student.index || identifier,
+      );
+      const fetchStudentScores = async () => {
+        const primary = await supabase
+          .from("scores")
+          .select("id, score, subject, term, academic_year, exam_type, created_at")
+          .eq("student_id", student.id);
+        if (primary.error || (primary.data || []).length === 0) {
+          const fallback = studentIndex
+            ? await supabase
+                .from("scores")
+                .select("id, score, subject, term, academic_year, exam_type, created_at")
+                .eq("index_number", studentIndex)
+            : { data: [], error: null };
+          if (!fallback.error && (fallback.data || []).length) return fallback;
+          if (primary.error && fallback.error) return primary;
+          if (primary.error && !fallback.error) return fallback;
+          if (!primary.error && fallback.error) return fallback;
+        }
+        return primary;
+      };
+
       const [
         { data: attendanceRows, error: attendanceError },
         { data: feeRows, error: feeError },
@@ -25485,7 +25231,7 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
           .select("*")
           .eq("student_id", student.id)
           .order("id", { ascending: false }),
-        supabase.from("scores").select("score").eq("student_id", student.id),
+        fetchStudentScores(),
         fetchStudentSelection({
           supabase,
           userEmail: user?.email || getSessionUserEmail(),
@@ -25530,10 +25276,18 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
                 : "unpaid"),
         })),
       );
+      const validScoreRows = (scoreRows || []).filter(
+        (row) => Number.isFinite(Number(row?.score)) && Number(row.score) >= 0,
+      );
+      setScoreRecords(validScoreRows);
       setScoreValues(
-        (scoreRows || [])
-          .map((row) => Number(row?.score ?? 0))
-          .filter((value) => Number.isFinite(value) && value >= 0),
+        validScoreRows
+          .filter(
+            (row) =>
+              row.term === appCfg.currentTerm &&
+              row.academic_year === appCfg.academicYear,
+          )
+          .map((row) => Number(row.score)),
       );
       setSelectionRow(selection || null);
     };
@@ -25543,7 +25297,14 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
         `Student records could not be loaded: ${error?.message || "Supabase request failed."}`,
       );
     });
-  }, [user?.email, user?.id, user?.index, user?.name]);
+  }, [
+    appCfg.academicYear,
+    appCfg.currentTerm,
+    user?.email,
+    user?.id,
+    user?.index,
+    user?.name,
+  ]);
 
   useEffect(() => {
     if (tab === "my-selection") {
@@ -25608,13 +25369,17 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
             status: selectionRow?.status || "not-submitted",
           }}
           scoreValues={scoreValues}
+          onOpenLearningLibrary={() => goTab("study-content")}
         />
       ),
       profile: <StudentProfile user={user} studentData={studentData} />,
-      results: <StudentResultsPage scoreValues={scoreValues} attendanceData={attendanceData} feesData={feesData} />,
+      results: <StudentAcademicResultsPage scoreRecords={scoreRecords} />,
       "live-tests": <StudentLiveTestsPage user={user} studentData={studentData} />,
-      "study-content": <StudentStudyContentPage user={user} studentData={studentData} />,
-      "study-groups": <StudentStudyGroupsPage user={user} studentData={studentData} />,
+      "study-content": (
+        <Suspense fallback={<div className="portal-loading" role="status">Loading learning library...</div>}>
+          <StudentStudyContentPage studentData={studentData} />
+        </Suspense>
+      ),
       attendance: <StudentAttendance attendanceData={attendanceData} />,
       fees: <StudentFees feesData={feesData} />,
       docs: <DocumentsPage />,
@@ -25682,7 +25447,6 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
       "my-selection": (
         <MySelection selectionRow={selectionRow} approvalInfo={approvalInfo} />
       ),
-      predictor: <PlacementPredictor schoolsData={schoolsData} />,
       chat: <ChatPage chatUsers={chatUsers} onChatUsersChange={setChatUsers} />,
       assignments: <AssignmentTrackerPage />,
       "exam-schedule": <ExamSchedulePage />,
@@ -25693,18 +25457,9 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
           feesData={feesData}
         />
       ),
-      "study-planner": <StudyPlannerPage />,
-      "attendance-corrections": (
-        <AttendanceCorrectionPage attendanceData={attendanceData} />
-      ),
       "pay-fees": <StudentPaymentsPage feesData={feesData} />,
-      "payment-plan": <StudentPaymentPlansPage feesData={feesData} />,
-      "announcements-pro": <PersonalizedAnnouncementsPage />,
       "upload-docs": <StudentUploadDocsPage />,
-      "calendar-sync": <CalendarSyncPage />,
       "support-tickets": <StudentTicketsPage />,
-      goals: <StudentGoalsPage />,
-      scholarships: <ScholarshipBoardPage />,
       resources: <LearningResourcesPage />,
     };
     return (
@@ -25728,7 +25483,6 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
           alignItems: "center",
           justifyContent: "center",
           minHeight: "100vh",
-          background: "#f8fafc",
         }}
       >
         <div
@@ -25803,7 +25557,9 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
               );
             if (childToParent[item.key]) return null;
 
-            const childrenKeys = STUDENT_SUBPAGE_MAP[item.key] || [];
+            const childrenKeys = (STUDENT_SUBPAGE_MAP[item.key] || []).filter(
+              (key) => filteredStudentNav.some((navItem) => navItem.key === key),
+            );
             const hasChildren = childrenKeys.length > 0;
             const activeParent = tab === item.key || childrenKeys.includes(tab);
 
@@ -25942,93 +25698,112 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
 // ROOT
 function GhanaCampus() {
   const [session, setSession] = useState(null);
+  const [authLoading, setAuthLoading] = useState(!!supabase);
   const [darkMode, setDarkMode] = useState(false);
   const [appSettings, setAppSettings] = useState(DEFAULT_SETTINGS);
+  const authRestoreRequestRef = useRef(0);
 
   const hydrateSessionFromSupabase = useCallback(async (eventUser) => {
+    const requestId = ++authRestoreRequestRef.current;
+    setAuthLoading(true);
+    const isCurrentRequest = () => requestId === authRestoreRequestRef.current;
     if (!supabase) {
       setSession(null);
       setDarkMode(false);
       writeAppSession(null);
+      setAuthLoading(false);
       return;
     }
 
-    let authUser = eventUser;
-    if (authUser === undefined) {
-      const { data } = await supabase.auth.getSession();
-      authUser = data?.session?.user;
-    }
+    try {
+      let authUser = eventUser;
+      if (authUser === undefined) {
+        const { data, error } = await supabase.auth.getSession();
+        if (error) throw error;
+        authUser = data?.session?.user;
+      }
 
-    if (!authUser) {
-      setSession(null);
-      setDarkMode(false);
-      writeAppSession(null);
-      return;
-    }
-
-    const { data: profile, error: profileError } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", authUser.id)
-      .maybeSingle();
-    if (profileError || !profile) {
-      setSession(null);
-      setDarkMode(false);
-      writeAppSession(null);
-      return;
-    }
-
-    const { data: preferenceRow, error: preferenceError } = await supabase
-      .from("user_preferences")
-      .select("preferences")
-      .eq("user_id", authUser.id)
-      .maybeSingle();
-    if (preferenceError) {
-      console.error("Could not load account preferences:", preferenceError.message);
-      setDarkMode(false);
-    } else {
-      setDarkMode(!!preferenceRow?.preferences?.dark_mode);
-    }
-
-    const displayName =
-      profile.full_name ||
-      authUser.user_metadata?.full_name ||
-      authUser.email ||
-      authUser.phone ||
-      "User";
-    const role = normalizeRoleKey(profile.role);
-    let studentRecord = null;
-    if (role === "student") {
-      const { data, error: studentError } = await supabase
-        .from("students")
-        .select("id, index_number, index, full_name")
-        .eq("auth_user_id", authUser.id)
-        .maybeSingle();
-      if (studentError || !data) {
+      if (!authUser) {
+        if (!isCurrentRequest()) return;
         setSession(null);
+        setDarkMode(false);
         writeAppSession(null);
         return;
       }
-      studentRecord = data;
-    }
-    const restoredPortal = resolvePortalFromAccount(profile, role);
 
-    const restoredSession = {
-      authSource: "supabase",
-      portal: restoredPortal,
-      user: {
-        id: studentRecord?.id || authUser.id,
-        authUserId: authUser.id,
-        email: authUser.email,
-        role,
-        name: studentRecord?.full_name || displayName,
-        index: studentRecord?.index_number || studentRecord?.index || "",
-        registered_school_id: profile.registered_school_id ?? null,
-        managed_school_name: profile.managed_school_name || "",
-      },
-    };
-    setSession(restoredSession);
-    writeAppSession(restoredSession);
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", authUser.id)
+        .maybeSingle();
+      if (profileError || !profile) {
+        if (!isCurrentRequest()) return;
+        setSession(null);
+        setDarkMode(false);
+        writeAppSession(null);
+        return;
+      }
+
+      const { data: preferenceRow, error: preferenceError } = await supabase
+        .from("user_preferences")
+        .select("preferences")
+        .eq("user_id", authUser.id)
+        .maybeSingle();
+      if (preferenceError) {
+        console.error("Could not load account preferences:", preferenceError.message);
+      }
+
+      const displayName =
+        profile.full_name ||
+        authUser.user_metadata?.full_name ||
+        authUser.email ||
+        authUser.phone ||
+        "User";
+      const role = normalizeRoleKey(profile.role);
+      let studentRecord = null;
+      if (role === "student") {
+        const { data, error: studentError } = await supabase
+          .from("students")
+          .select("id, index_number, index, full_name")
+          .eq("auth_user_id", authUser.id)
+          .maybeSingle();
+        if (studentError || !data) {
+          if (!isCurrentRequest()) return;
+          setSession(null);
+          writeAppSession(null);
+          return;
+        }
+        studentRecord = data;
+      }
+      const restoredPortal = resolvePortalFromAccount(profile, role);
+
+      const restoredSession = {
+        authSource: "supabase",
+        portal: restoredPortal,
+        user: {
+          id: studentRecord?.id || authUser.id,
+          authUserId: authUser.id,
+          email: authUser.email,
+          role,
+          name: studentRecord?.full_name || displayName,
+          index: studentRecord?.index_number || studentRecord?.index || "",
+          registered_school_id: profile.registered_school_id ?? null,
+          managed_school_name: profile.managed_school_name || "",
+        },
+      };
+      if (!isCurrentRequest()) return;
+      setDarkMode(!!preferenceRow?.preferences?.dark_mode);
+      setSession(restoredSession);
+      writeAppSession(restoredSession);
+    } catch (error) {
+      if (!isCurrentRequest()) return;
+      console.error("Could not restore the Supabase session:", error);
+      setSession(null);
+      setDarkMode(false);
+      writeAppSession(null);
+    } finally {
+      if (isCurrentRequest()) setAuthLoading(false);
+    }
   }, []);
 
   const toggleDarkMode = async () => {
@@ -26039,10 +25814,24 @@ function GhanaCampus() {
 
     const nextDarkMode = !darkMode;
     setDarkMode(nextDarkMode);
+    const { data: preferenceRow, error: readError } = await supabase
+      .from("user_preferences")
+      .select("preferences")
+      .eq("user_id", session.user.authUserId)
+      .maybeSingle();
+    if (readError) {
+      setDarkMode(!nextDarkMode);
+      window.alert(`Display preference was not saved: ${readError.message}`);
+      return;
+    }
+
     const { error } = await supabase.from("user_preferences").upsert(
       {
         user_id: session.user.authUserId,
-        preferences: { dark_mode: nextDarkMode },
+        preferences: {
+          ...(preferenceRow?.preferences || {}),
+          dark_mode: nextDarkMode,
+        },
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id" },
@@ -26173,6 +25962,9 @@ function GhanaCampus() {
       let mergedSettings = data?.config
         ? { ...DEFAULT_SETTINGS, ...data.config }
         : { ...DEFAULT_SETTINGS };
+      mergedSettings.studentNavVisibility = getStudentNavVisibility(
+        data?.config || {},
+      );
 
       const { data: classRows, error: classError } = await supabase
         .from("classes")
@@ -26216,10 +26008,17 @@ function GhanaCampus() {
       value={{ session, cfg: appSettings, updateCfg: setAppSettings }}
     >
       <style>{css}</style>
-      {!session ? (
-        <Landing
-          onSelect={(portal, user, password) => login(portal, user, password)}
-        />
+      {authLoading ? (
+        <div className="portal-loading" role="status">
+          <div className="loading-spinner" />
+          <p>Restoring your session...</p>
+        </div>
+      ) : !session ? (
+        <Suspense fallback={<div className="portal-loading" role="status">Loading sign-in...</div>}>
+          <Landing
+            onSelect={(portal, user, password) => login(portal, user, password)}
+          />
+        </Suspense>
       ) : session.portal === "admin" ? (
         <AdminPortal
           user={session.user}

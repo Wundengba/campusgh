@@ -14,31 +14,36 @@ Apply [supabase/migrations/024_student_id_password_auth.sql](supabase/migrations
 
 After 024, apply [supabase/migrations/025_student_portal_records.sql](supabase/migrations/025_student_portal_records.sql) and then [supabase/migrations/026_student_document_storage.sql](supabase/migrations/026_student_document_storage.sql). Migration 025 adds student-owned records for study plans, payment notices, payment-plan requests, attendance corrections, support tickets, goals, document metadata, assignment status, and announcement-read state. It also replaces the public fees policy with student read-only access and admin or school-scoped school-admin management. Migration 026 creates a private document bucket with per-student folder access.
 
+Apply [supabase/migrations/028_scores_by_term_and_academic_year.sql](supabase/migrations/028_scores_by_term_and_academic_year.sql) after migration 026. It assigns existing scores without a recorded period to an explicitly labeled unspecified term/year, then allows a separate score for each subject, assessment, term, and academic year. Academic Scores uses the current term and academic year from Settings when saving; the student Results page groups records by academic year and term.
+
 The student payment form only saves a payment notice for staff verification; it does not charge a card, transfer funds, or generate a transaction receipt. Actual payment processing requires selecting and integrating a payment provider.
 
 These changes persist the implemented, connected workflows; they do not turn static/demo pages or placeholder features into real services. Some older tables outside these migrations still have permissive policies from the original setup. Review and replace those policies with authenticated, role- and school-scoped RLS before storing production personal, academic, or financial data. Applying these migrations is required before the newly connected student workflows and private document uploads can be used.
 
-Student accounts must be provisioned by an administrator; the app does not create student passwords or store them in the database. Set the student's initial Supabase Auth password to the parent/guardian contact recorded in `students.parent_contact` (use the exact value as stored). For each student:
+Student accounts use the alias `student-<12-digit-ID>@students.campusghana.invalid`; students sign in with the 12-digit ID and password. The `provision-student-logins` Supabase Edge Function creates missing Auth accounts using the exact `students.parent_contact` value as the initial password, confirms the alias email, links `students.auth_user_id`, and creates the `student` profile. If the student has not marked a password as changed, running setup again resets it to the current parent/guardian contact. The My Profile password form marks the password as changed so subsequent setup attempts preserve it.
 
-1. In Supabase Authentication → Users, create or update the Auth user with email `student-<12-digit-ID>@students.campusghana.invalid`, set its password to the student's recorded parent/guardian contact, and mark the email as confirmed. For an existing OTP-linked account, update the existing user's email and password so its Auth UID and student link stay the same.
-2. Run this in the SQL Editor, replacing the sample ID in both places. Confirm that the student row is linked and the profile row has role `student`.
+Deploy the function from the repository's `backend` directory after linking the Supabase project:
+
+```sh
+supabase functions deploy provision-student-logins --project-ref YOUR_PROJECT_REF
+```
+
+The function uses the Supabase-provided `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` secrets. Never expose the service-role key in frontend configuration.
+
+New student enrollment attempts to create the login immediately. If that fails, administrators can select existing students in the Students directory and choose **Set Up Logins** to retry or provision existing students in batches. School administrators can provision only students assigned to their school. A student account is ready only after provisioning succeeds; student records without a 12-digit ID or a guardian contact accepted as a Supabase password need correction first.
+
+The parent/guardian contact is only the initial password. Students should change it immediately from **My Profile → Change Password**. Provisioning an existing login intentionally does not reset a password that the student has already changed. Passwords are stored only in Supabase Auth, never in the student record or frontend code.
+
+For accounts created by the earlier manual process, the same provisioning function can link an existing alias account without changing its current password. To verify a student account, run this query with the ID substituted:
 
 ```sql
-update public.students as s
-   set auth_user_id = u.id
-  from auth.users as u
- where (s.index_number = '123456789012' or s."index" = '123456789012')
-   and lower(u.email) = lower('student-123456789012@students.campusghana.invalid');
-
-insert into public.profiles (id, email, full_name, role)
-select u.id, u.email, s.full_name, 'student'
-  from auth.users as u
-  join public.students as s on s.auth_user_id = u.id
- where (s.index_number = '123456789012' or s."index" = '123456789012')
-on conflict (id) do update
-  set email = excluded.email,
-      full_name = excluded.full_name
-  where public.profiles.role = 'student';
+select s.index_number,
+       s.auth_user_id,
+       p.role
+  from public.students s
+  left join public.profiles p on p.id = s.auth_user_id
+ where s.index_number = '123456789012'
+    or s."index" = '123456789012';
 ```
 
 The guardian contact is a weak, guessable password and may be shared by siblings. Treat it only as a temporary credential and change it to a unique password in Supabase Auth as soon as possible. Never put student passwords in `students`, `users`, or frontend code; Supabase Auth stores the password hash.
@@ -102,3 +107,5 @@ Migration `007_backfill_teacher_registered_school_scope.sql` backfills `teachers
 Migration `008_expand_teacher_profile_fields.sql` adds teacher profile columns used by the frontend add/edit form: `employee_id`, `gender`, `date_of_birth`, `qualification`, `hire_date`, and `address`.
 
 Security note: the original migrations grant open access to many operational tables. Migration 023 restricts profiles and students, but attendance, fees, scores, results, school selections, and several other tables still need authenticated, role-aware RLS policies before real personal or financial data is used. The anon key is public and does not replace RLS.
+
+For the multi-level Learning Library, apply [supabase/migrations/029_learning_hub_audiences.sql](supabase/migrations/029_learning_hub_audiences.sql) after the existing study-content migrations. It adds audience and material-type fields for JHS/BECE, SHS/WASSCE, and university resources. Existing materials are kept visible to all levels by default; review and retag them in the Learning Library editor as appropriate.

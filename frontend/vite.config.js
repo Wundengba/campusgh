@@ -23,29 +23,6 @@ function manualChunks(id) {
   const packageName = getPackageName(id);
   if (!packageName) return;
 
-  const pdfCorePackages = new Set([
-    "jspdf",
-    "@babel/runtime",
-    "fast-png",
-    "fflate",
-    "iobuffer",
-    "pako",
-    "rgbcolor",
-    "stackblur-canvas",
-    "svg-pathdata",
-    "tslib",
-  ]);
-
-  const pdfRenderPackages = new Set([
-    "canvg",
-    "core-js",
-    "dompurify",
-    "html2canvas",
-    "iceberg-js",
-    "performance-now",
-    "raf",
-  ]);
-
   if (["react", "react-dom", "scheduler"].includes(packageName)) {
     return "react-vendor";
   }
@@ -58,15 +35,7 @@ function manualChunks(id) {
     return "supabase";
   }
 
-  if (pdfCorePackages.has(packageName)) {
-    return "pdf";
-  }
-
-  if (pdfRenderPackages.has(packageName)) {
-    return "pdf-render";
-  }
-
-  return `vendor-${packageName.replace("@", "").replace("/", "-")}`;
+  // Keep dynamically imported packages, such as jsPDF, in their lazy chunks.
 }
 
 export default defineConfig({

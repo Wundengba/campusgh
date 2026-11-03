@@ -1,4 +1,4 @@
-const CACHE_NAME = "campus-ghana-shell-v2";
+const CACHE_NAME = "campus-ghana-shell-v3";
 const APP_SHELL = ["/", "/manifest.webmanifest", "/icons/campus-icon.svg", "/icons/campus-icon-maskable.svg"];
 
 self.addEventListener("install", (event) => {

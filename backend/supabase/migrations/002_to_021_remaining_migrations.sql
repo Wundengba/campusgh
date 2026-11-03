@@ -507,7 +507,7 @@ begin
   execute format(
     $sql$
       with teacher_email_scope as (
-        selec
+        select
           email_key,
           min(registered_school_id) as registered_school_id
         from (
@@ -869,7 +869,7 @@ create policy "live_tests_admin_all" on public.live_tests
 
 -- Create a simple policy for students to view active tests
 create policy "live_tests_students_view" on public.live_tests
-  for selec
+  for select
   to authenticated
   using (is_active = true OR created_by = auth.uid());
 

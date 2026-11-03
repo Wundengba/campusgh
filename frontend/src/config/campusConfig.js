@@ -38,6 +38,7 @@ export const DEFAULT_SETTINGS = {
     "exam-schedule": true,
     "live-tests": true,
     "study-content": true,
+    courses: true,
     "study-groups": true,
     goals: true,
     selection: true,

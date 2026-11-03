@@ -113,8 +113,8 @@ Deno.serve(async (request) => {
       }
 
       const index = String(student.index_number || student.index || "").trim();
-      if (!/^\d{12}$/.test(index)) {
-        throw new Error("Student ID must be exactly 12 digits.");
+      if (!/^(?:CG-[A-Z]{2}\d{9,}|CG-\d{10}|\d{12})$/i.test(index)) {
+        throw new Error("Student ID must be a region-based CG- ID or a legacy 12-digit ID.");
       }
       const initialPassword = String(student.parent_contact || "");
       if (initialPassword.length < 6) {

@@ -251,16 +251,26 @@ const css = `
   img { max-width:100%; height:auto; }
   input, select, textarea, button { font-family: var(--font); }
 
-  .app { display:flex; flex-direction:column; min-height:100vh; }
+  .app {
+    display:flex;
+    flex-direction:column;
+    height:100vh;
+    height:100dvh;
+    min-height:0;
+    overflow:hidden;
+  }
 
   /* LANDING */
-  .landing { min-height:100vh; min-height:100svh; display:flex; align-items:center; justify-content:center;
+  .landing { height:100vh; height:100dvh; min-height:0; display:flex; align-items:center; justify-content:center;
     position:relative; overflow:hidden; isolation:isolate; padding:28px 20px; perspective:1200px;
     background:
         radial-gradient(circle at 8% 12%, rgba(146,184,255,.68) 0 88px, rgba(255,255,255,.88) 90px 96px, rgba(191,211,255,.52) 100px, transparent 112px),
         radial-gradient(circle at 98% 34%, rgba(182,204,255,.52) 0 48px, rgba(255,255,255,.9) 50px 55px, rgba(201,216,255,.48) 59px, transparent 69px),
         radial-gradient(circle at 4% 91%, rgba(153,190,255,.58) 0 88px, rgba(255,255,255,.88) 90px 96px, rgba(191,211,255,.5) 100px, transparent 112px),
       linear-gradient(145deg,#edf2ff 0%,#e4ebff 48%,#f5f6ff 100%); }
+  .landing.landing-signup { position:fixed; inset:0; width:100%; height:100vh; height:100dvh;
+    min-height:0; padding:max(12px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right))
+      max(12px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left)); overflow:hidden; }
   .landing::before, .landing::after { content:""; position:absolute; z-index:-1; width:180px; height:180px; border-radius:50%;
     background:radial-gradient(circle at 32% 26%,#fff 0%,rgba(255,255,255,.78) 12%,rgba(211,226,255,.54) 54%,rgba(161,189,249,.3) 68%,rgba(255,255,255,.78) 73%,rgba(194,212,255,.22) 80%,transparent 83%);
     box-shadow:inset 8px 8px 18px rgba(255,255,255,.72),inset -8px -10px 24px rgba(108,142,211,.12),0 20px 42px rgba(108,142,211,.13);
@@ -357,6 +367,15 @@ const css = `
   @media (prefers-reduced-motion:reduce) {
     .landing::before,.landing::after { animation:none; }
     .landing .btn-primary,.login-portal-option { transition:none; }
+  }
+  @media (max-height:700px) {
+    .landing:not(.landing-signup) { align-items:flex-start; }
+    .landing:not(.landing-signup) .landing-box {
+      max-height:calc(100dvh - 56px);
+      overflow-y:auto;
+      overscroll-behavior:contain;
+      scrollbar-width:thin;
+    }
   }
   .auth-input-wrap .form-input { padding-left:40px; }
   .auth-input-wrap .form-input[type="password"], .auth-input-wrap .form-input[data-has-toggle="true"] { padding-right:40px; }
@@ -499,7 +518,14 @@ const css = `
   body.dark-mode .stat-sub { color:#94a3b8; }
 
   /* SHELL */
-  .shell { display:flex; padding-top:var(--topbar-h); min-height:100vh; }
+  .shell {
+    display:flex;
+    flex:1;
+    height:100%;
+    min-height:0;
+    overflow:hidden;
+    padding-top:var(--topbar-h);
+  }
   .sidebar { width:var(--sidebar-w); background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%); border-right:1px solid #dbe5f3;
     position:fixed; top:var(--topbar-h); bottom:0; left:0; overflow-y:auto; z-index:90;
     transition:transform .25s ease; padding:10px 10px 16px; scrollbar-width:thin; scrollbar-color:#c9d6ea transparent; }
@@ -527,8 +553,25 @@ const css = `
   .bottom-nav-item svg { opacity:.8; transition:all .2s ease; filter:grayscale(20%); }
   .bottom-nav-item:hover svg, .bottom-nav-item.active svg { opacity:1; filter:none; }
 
-  .main { flex:1; margin-left:var(--sidebar-w); padding:24px; min-height:calc(100vh - var(--topbar-h)); overflow-x:hidden; width:calc(100vw - var(--sidebar-w)); max-width:100%; }
-  .main.full { margin-left:0; }
+  .main {
+    flex:1;
+    min-width:0;
+    min-height:0;
+    height:calc(100vh - var(--topbar-h));
+    height:calc(100dvh - var(--topbar-h));
+    margin-left:var(--sidebar-w);
+    padding:24px;
+    overflow-x:hidden;
+    overflow-y:auto;
+    overscroll-behavior-y:contain;
+    scrollbar-width:thin;
+    scrollbar-color:#c9d6ea transparent;
+    width:calc(100vw - var(--sidebar-w));
+    max-width:100%;
+  }
+  .main::-webkit-scrollbar { width:8px; }
+  .main::-webkit-scrollbar-thumb { background:#c9d6ea; border-radius:99px; }
+  .main.full { margin-left:0; width:100%; }
   .page-actions-row { display:flex; gap:12px; margin-bottom:16px; flex-wrap:wrap; }
   .page-actions-row .form-control { flex:1 1 220px; min-width:0; }
   .page-actions-row .btn { flex-shrink:0; }
@@ -1755,40 +1798,52 @@ const css = `
     border:3px solid rgba(255,255,255,.4); color:#fff; flex-shrink:0; }
   .profile-name { font-size:1.4rem; font-weight:800; }
   .profile-role { opacity:.8; font-size:.875rem; margin-top:4px; }
-  .student-profile-shell { display:grid; gap:16px; }
+  .student-verified-badge {
+    display:inline-block;
+    width:28px;
+    height:28px;
+    margin-left:7px;
+    object-fit:contain;
+    vertical-align:middle;
+    filter:drop-shadow(0 1px 2px rgba(15,23,42,.2));
+  }
+  .student-profile-shell { display:grid; gap:18px; }
   .student-profile-hero {
-    background:linear-gradient(135deg,#0f172a,#1e3a8a 55%,#2563eb);
+    background:
+      radial-gradient(circle at 88% 12%,rgba(147,197,253,.28),transparent 13rem),
+      linear-gradient(125deg,#0b1730 0%,#173b78 56%,#2563eb 100%);
     color:#fff;
-    border-radius:16px;
-    border:1px solid rgba(148,163,184,.25);
-    box-shadow:0 20px 38px rgba(15,23,42,.22);
-    padding:20px;
+    border-radius:22px;
+    border:1px solid rgba(191,219,254,.35);
+    box-shadow:0 18px 42px rgba(30,64,130,.2);
+    padding:clamp(18px,3vw,30px);
     display:grid;
-    grid-template-columns:auto 1fr auto;
-    gap:16px;
+    grid-template-columns:auto minmax(0,1fr) auto;
+    gap:20px;
     align-items:center;
   }
   .student-profile-avatar {
-    width:74px;
-    height:74px;
-    border-radius:18px;
-    border:2px solid rgba(255,255,255,.45);
+    width:88px;
+    height:88px;
+    border-radius:24px;
+    border:3px solid rgba(255,255,255,.72);
     background:linear-gradient(135deg,rgba(255,255,255,.26),rgba(255,255,255,.08));
     display:flex;
     align-items:center;
     justify-content:center;
-    font-size:1.5rem;
+    font-size:1.65rem;
     font-weight:800;
     letter-spacing:.6px;
+    box-shadow:0 10px 24px rgba(5,15,38,.22);
   }
-  .student-profile-title { font-size:1.35rem; font-weight:800; letter-spacing:.2px; }
-  .student-profile-meta { margin-top:4px; color:rgba(226,232,240,.9); font-size:.86rem; }
+  .student-profile-title { font-size:clamp(1.25rem,2.4vw,1.8rem); font-weight:800; letter-spacing:-.025em; overflow-wrap:anywhere; }
+  .student-profile-meta { margin-top:8px; color:rgba(226,232,240,.9); font-size:.9rem; line-height:1.6; overflow-wrap:anywhere; }
   .student-profile-pill {
     display:inline-flex;
     align-items:center;
     gap:6px;
-    background:rgba(148,163,184,.22);
-    border:1px solid rgba(226,232,240,.28);
+    background:rgba(255,255,255,.12);
+    border:1px solid rgba(226,232,240,.25);
     border-radius:999px;
     padding:5px 10px;
     font-size:.74rem;
@@ -1803,10 +1858,11 @@ const css = `
     border-radius:12px;
     padding:10px 12px;
     min-width:180px;
+    max-width:100%;
   }
-  .student-profile-term small { display:block; font-size:.73rem; color:#cbd5e1; margin-bottom:4px; }
-  .student-profile-term strong { display:block; font-size:.98rem; }
-  .student-profile-grid { display:grid; grid-template-columns:2fr 1.1fr; gap:16px; }
+  .student-profile-term small { display:block; font-size:.72rem; color:#dbeafe; text-transform:uppercase; letter-spacing:.08em; margin-bottom:5px; }
+  .student-profile-term strong { display:block; font-size:1rem; }
+  .student-profile-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; align-items:start; }
   .student-profile-card { background:#fff; border:1px solid var(--border); border-radius:14px; box-shadow:var(--shadow); }
   .student-profile-card-head {
     display:flex;
@@ -1814,23 +1870,23 @@ const css = `
     justify-content:space-between;
     gap:10px;
     border-bottom:1px solid #e2e8f0;
-    padding:14px 16px;
+    padding:17px 18px;
   }
-  .student-profile-card-head h3 { font-size:.92rem; font-weight:800; color:#0f172a; }
-  .student-profile-card-body { padding:14px 16px; }
+  .student-profile-card-head h3 { font-size:.94rem; font-weight:800; color:#0f172a; letter-spacing:-.01em; }
+  .student-profile-card-body { padding:16px 18px; }
   .student-profile-list { display:grid; gap:10px; }
   .student-profile-row {
-    display:flex;
-    align-items:flex-start;
-    justify-content:space-between;
-    gap:12px;
-    padding:10px 12px;
-    border-radius:10px;
-    background:#f8fafc;
-    border:1px solid #e2e8f0;
+    display:grid;
+    grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr);
+    align-items:start;
+    gap:14px;
+    padding:12px 14px;
+    border-radius:12px;
+    background:linear-gradient(135deg,#f8fafc,#f4f7fc);
+    border:1px solid #e7edf5;
   }
-  .student-profile-row label { font-size:.74rem; text-transform:uppercase; letter-spacing:.5px; color:#64748b; font-weight:700; }
-  .student-profile-row span { font-size:.9rem; font-weight:700; color:#0f172a; text-align:right; }
+  .student-profile-row label { font-size:.7rem; text-transform:uppercase; letter-spacing:.055em; color:#64748b; font-weight:700; line-height:1.5; }
+  .student-profile-row span { min-width:0; font-size:.9rem; font-weight:650; color:#0f172a; text-align:right; overflow-wrap:anywhere; line-height:1.5; }
   .student-profile-kpis { display:grid; grid-template-columns:1fr; gap:10px; }
   .student-profile-kpi {
     border-radius:12px;
@@ -1922,6 +1978,14 @@ const css = `
   @keyframes spin { to { transform:rotate(360deg); } }
 
   .sidebar-overlay { display:none; position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:109; }
+  @media (max-width:1023px) {
+    .landing .form-input,
+    .app .form-control,
+    .app .form-input,
+    .app input,
+    .app select,
+    .app textarea { font-size:16px; }
+  }
   @media (max-width:1280px) {
     .stats-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
     .students-summary-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
@@ -1967,7 +2031,6 @@ const css = `
     .sidebar { width:min(280px,85vw); padding-bottom:80px; }
 
     .main { padding:14px 10px calc(82px + env(safe-area-inset-bottom)); }
-
     .page-header { padding:16px 18px; margin-bottom:16px; }
     .page-title { font-size:1.3rem; }
     .page-sub { font-size:.8rem; }
@@ -1991,9 +2054,10 @@ const css = `
     .profile-header { flex-wrap:wrap; gap:14px; padding:18px; }
     .profile-avatar { width:64px; height:64px; font-size:1.6rem; }
     .profile-name { font-size:1.15rem; }
-    .student-profile-hero { grid-template-columns:1fr; text-align:left; }
-    .student-profile-term { text-align:left; min-width:0; }
+    .student-profile-hero { grid-template-columns:auto minmax(0,1fr); text-align:left; }
+    .student-profile-term { grid-column:1 / -1; text-align:left; min-width:0; }
     .student-profile-grid { grid-template-columns:1fr; }
+    .student-profile-row { grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr); gap:10px; }
 
     .chat-msg { max-width:88%; }
     .chat-layout { flex-direction:column; }
@@ -2108,9 +2172,11 @@ const css = `
     .profile-avatar { width:54px; height:54px; font-size:1.3rem; }
     .profile-name { font-size:1rem; }
     .profile-role { font-size:.78rem; }
-    .student-profile-avatar { width:64px; height:64px; font-size:1.2rem; border-radius:14px; }
+    .student-profile-avatar { width:64px; height:64px; font-size:1.2rem; border-radius:18px; }
     .student-profile-title { font-size:1.1rem; }
     .student-profile-meta { font-size:.8rem; }
+    .student-profile-row { grid-template-columns:1fr; gap:4px; }
+    .student-profile-row span { text-align:left; }
     .student-profile-card-head, .student-profile-card-body { padding:12px; }
     .student-profile-row { padding:9px 10px; }
 
@@ -2260,7 +2326,7 @@ const css = `
     .sidebar { transform:translateX(0) !important; }
     .sidebar.closed { transform:translateX(-100%) !important; }
     .main { margin-left:var(--sidebar-w); }
-    .main.full { margin-left:0; }
+    .main.full { margin-left:0; width:100vw; }
     .menu-btn { display:flex; }
   }
 
@@ -3188,6 +3254,319 @@ body.dark-mode .app .bottom-nav-item.active {
   background:linear-gradient(135deg,rgba(36,70,130,.52),rgba(30,53,96,.62));
   box-shadow:inset 0 0 0 1px rgba(105,149,223,.24);
 }
+
+/* Admin workspace */
+.admin-app {
+  background:#f4f7fc;
+}
+.admin-app .topbar {
+  background:#fff;
+  border-bottom:1px solid #e6ebf3;
+  box-shadow:0 2px 12px rgba(22,42,78,.04);
+}
+.admin-app .topbar-left { padding-left:42px; }
+.admin-app .topbar-name {
+  display:block !important;
+  color:#142748;
+  font-size:.95rem;
+  font-weight:800;
+}
+.admin-app .menu-btn,
+.admin-app .topbar-btn,
+.admin-app .menu-btn svg,
+.admin-app .topbar-btn svg { color:#435979 !important; }
+.admin-app .topbar-actions {
+  background:#f4f7fb;
+  border-color:#e4eaf3;
+  box-shadow:none;
+}
+.admin-app .topbar-actions .topbar-btn + .topbar-btn { box-shadow:-1px 0 0 #e1e8f1; }
+.admin-app .topbar-btn:hover { background:#e9eff8; }
+.admin-app .sidebar {
+  background:#102344;
+  border-right:1px solid #20385d;
+  box-shadow:8px 0 24px rgba(16,35,68,.08);
+  backdrop-filter:none;
+}
+.admin-app .sidebar-brand {
+  justify-content:flex-start;
+  gap:11px;
+  padding:12px 9px 18px;
+  border-bottom-color:rgba(195,213,241,.14);
+}
+.admin-app .sidebar-brand img {
+  width:42px;
+  height:42px;
+  flex:0 0 42px;
+  border:1px solid rgba(255,255,255,.25);
+  border-radius:12px;
+  box-shadow:none;
+}
+.admin-sidebar-brand-copy { display:grid; gap:3px; text-align:left; }
+.admin-sidebar-brand-copy strong {
+  color:#f8fbff;
+  font-size:.87rem;
+  font-weight:800;
+  letter-spacing:-.01em;
+}
+.admin-sidebar-brand-copy small {
+  color:#91a7ca;
+  font-size:.58rem;
+  font-weight:750;
+  letter-spacing:.14em;
+}
+.admin-app .sidebar-section {
+  padding:17px 11px 6px;
+  color:#8196b8;
+  font-size:.62rem;
+  font-weight:750;
+  letter-spacing:.13em;
+}
+.admin-app .nav-item {
+  gap:11px;
+  padding:9px 11px;
+  margin:2px 0;
+  border-radius:9px;
+  color:#b8c8df;
+  transition:background .16s ease,color .16s ease;
+}
+.admin-app .nav-item:hover {
+  background:rgba(255,255,255,.08);
+  color:#fff;
+  transform:none;
+}
+.admin-app .nav-item.active {
+  background:#244c87;
+  color:#fff;
+  font-weight:700;
+  box-shadow:inset 0 0 0 1px rgba(151,190,255,.16);
+}
+.admin-app .nav-item.active::before { width:3px; background:#77b7ff; }
+.admin-app .nav-item .nav-item-icon,
+.admin-app .nav-item .nav-item-label,
+.admin-app .nav-item > span:last-child {
+  color:inherit !important;
+}
+.admin-app .nav-item .nav-item-icon { opacity:.9; }
+.admin-app .nav-item.active .nav-item-icon { opacity:1; }
+.admin-app .main { padding:28px 32px 36px; }
+.admin-app .main.full { margin-left:0; }
+.admin-app .admin-dashboard-header {
+  position:relative;
+  display:flex;
+  align-items:flex-end;
+  justify-content:space-between;
+  gap:20px;
+  margin-bottom:22px;
+  padding:22px 24px;
+  border:0;
+  border-radius:18px;
+  background:
+    radial-gradient(circle at 88% 18%,rgba(255,255,255,.2),transparent 14rem),
+    linear-gradient(115deg,#2563eb 0%,#4f46e5 56%,#7c3aed 100%);
+  box-shadow:0 12px 26px rgba(67,83,205,.2);
+  overflow:hidden;
+}
+.admin-dashboard-eyebrow {
+  margin-bottom:7px;
+  color:#c8dcff;
+  font-size:.68rem;
+  font-weight:800;
+  letter-spacing:.13em;
+  text-transform:uppercase;
+}
+.admin-app .admin-dashboard-header .page-title {
+  color:#fff;
+  font-size:1.75rem;
+  font-weight:800;
+  letter-spacing:-.035em;
+}
+.admin-app .admin-dashboard-header .page-sub {
+  margin-top:5px;
+  color:rgba(255,255,255,.82);
+  font-size:.86rem;
+}
+.admin-dashboard-header-meta {
+  display:grid;
+  justify-items:end;
+  gap:4px;
+  color:rgba(255,255,255,.9);
+  text-align:right;
+}
+.admin-app .admin-dashboard-header-meta [aria-label="Current date and time"] {
+  justify-content:flex-end;
+  margin-top:0 !important;
+  color:rgba(255,255,255,.95) !important;
+  font-size:.78rem !important;
+}
+.admin-dashboard-period { color:rgba(255,255,255,.76); font-size:.72rem; font-weight:650; }
+.admin-app .admin-dashboard .stats-grid {
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:15px;
+  margin-bottom:20px;
+}
+.admin-app .admin-dashboard .dashboard-stat-card {
+  min-width:0;
+  padding:18px;
+  border:1px solid var(--dash-border);
+  border-left:3px solid var(--dash-accent);
+  border-radius:14px;
+  background:linear-gradient(145deg,var(--dash-bg-start),var(--dash-bg-end));
+  box-shadow:0 8px 18px var(--dash-shadow);
+}
+.admin-app .admin-dashboard .dashboard-stat-card::before,
+.admin-app .admin-dashboard .dashboard-stat-card::after { display:none; }
+.admin-app .admin-dashboard .dashboard-stat-card .stat-icon {
+  position:absolute;
+  top:15px;
+  right:15px;
+  width:34px;
+  height:34px;
+  margin:0;
+  border-radius:10px;
+  background:rgba(255,255,255,.76) !important;
+  box-shadow:none;
+  backdrop-filter:none;
+}
+.admin-app .admin-dashboard .dashboard-stat-card .stat-label {
+  max-width:calc(100% - 34px);
+  margin-bottom:14px;
+  color:var(--dash-text) !important;
+  opacity:.78;
+  font-size:.68rem;
+  font-weight:750;
+  letter-spacing:.055em;
+}
+.admin-app .admin-dashboard .dashboard-stat-card .stat-value {
+  color:var(--dash-text) !important;
+  font-size:1.9rem;
+  line-height:1;
+}
+.admin-app .admin-dashboard .dashboard-stat-card .stat-sub {
+  margin-top:8px;
+  color:var(--dash-text) !important;
+  opacity:.76;
+  font-size:.72rem;
+}
+.admin-level-counts {
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:7px;
+  margin-top:2px;
+}
+.admin-level-count {
+  display:grid;
+  min-width:0;
+  justify-items:center;
+  gap:4px;
+  padding:7px 3px;
+  border-radius:9px;
+  background:rgba(255,255,255,.62);
+}
+.admin-level-count strong {
+  color:#087a4d;
+  font-size:1.15rem;
+  line-height:1;
+}
+.admin-level-count span {
+  color:#526579;
+  font-size:.58rem;
+  font-weight:750;
+  text-align:center;
+}
+.admin-level-count:nth-child(1) { background:rgba(255,255,255,.7); }
+.admin-level-count:nth-child(1) strong { color:#2563eb; }
+.admin-level-count:nth-child(2) { background:rgba(255,255,255,.7); }
+.admin-level-count:nth-child(2) strong { color:#ea7c20; }
+.admin-level-count:nth-child(3) { background:rgba(255,255,255,.7); }
+.admin-level-count:nth-child(3) strong { color:#7c3aed; }
+.admin-app .admin-dashboard .grid2 { gap:16px; }
+.admin-app .admin-dashboard .card {
+  border:1px solid #e5eaf2;
+  border-radius:14px;
+  background:#fff;
+  box-shadow:0 5px 16px rgba(24,49,86,.04);
+}
+.admin-app .admin-dashboard .card-padded { padding:20px; }
+.admin-app .admin-dashboard .card h3 {
+  color:#203654 !important;
+  font-size:.95rem !important;
+  padding-left:10px;
+  border-left:3px solid #4f7ef0;
+}
+.admin-app .admin-dashboard .grid2 > .card:nth-child(2) h3 { border-left-color:#f59e0b; }
+.admin-app .admin-dashboard .progress {
+  height:7px;
+  overflow:hidden;
+  border-radius:99px;
+  background:#edf1f7;
+}
+.admin-app .admin-dashboard .progress-bar { border-radius:99px; }
+body.dark-mode .admin-app { background:#0d1729; }
+body.dark-mode .admin-app .topbar {
+  background:#111f35;
+  border-bottom-color:#263956;
+}
+body.dark-mode .admin-app .topbar-name { color:#e4edff; }
+body.dark-mode .admin-app .topbar-actions {
+  background:#1b2c47;
+  border-color:#2c4161;
+}
+body.dark-mode .admin-app .topbar-actions .topbar-btn + .topbar-btn { box-shadow:-1px 0 0 #2c4161; }
+body.dark-mode .admin-app .topbar-btn:hover { background:#2a3e5e; }
+body.dark-mode .admin-app .admin-dashboard-header {
+  border:0;
+  background:
+    radial-gradient(circle at 88% 18%,rgba(129,140,248,.26),transparent 14rem),
+    linear-gradient(115deg,#1d4ed8 0%,#4338ca 56%,#6d28d9 100%);
+  box-shadow:0 12px 26px rgba(30,41,95,.32);
+}
+body.dark-mode .admin-app .admin-dashboard-header .page-title { color:#fff; }
+body.dark-mode .admin-app .admin-dashboard-header .page-sub { color:rgba(255,255,255,.82); }
+body.dark-mode .admin-dashboard-eyebrow { color:#c8dcff; }
+body.dark-mode .admin-dashboard-period { color:rgba(255,255,255,.76); }
+body.dark-mode .admin-app .admin-dashboard-header-meta [aria-label="Current date and time"] { color:rgba(255,255,255,.95) !important; }
+body.dark-mode .admin-app .admin-dashboard .dashboard-stat-card {
+  border-color:#293c5b;
+  border-left-color:var(--dash-accent);
+  background:linear-gradient(145deg,#1a2b47,#15243b);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.025),0 7px 18px rgba(0,0,0,.2);
+}
+body.dark-mode .admin-app .admin-dashboard .dashboard-stat-card .stat-value { color:#e3ecfa !important; }
+body.dark-mode .admin-app .admin-dashboard .dashboard-stat-card .stat-label { color:#e5edfc !important; }
+body.dark-mode .admin-app .admin-dashboard .dashboard-stat-card .stat-sub { color:#c0cde0 !important; }
+body.dark-mode .admin-app .admin-dashboard .dashboard-stat-card .stat-icon { background:#223550 !important; }
+body.dark-mode .admin-level-count { background:rgba(9,18,33,.52); }
+body.dark-mode .admin-level-count span { color:#d5e0f0; }
+body.dark-mode .admin-level-count:nth-child(1) strong { color:#93c5fd; }
+body.dark-mode .admin-level-count:nth-child(2) strong { color:#fdba74; }
+body.dark-mode .admin-level-count:nth-child(3) strong { color:#c4b5fd; }
+body.dark-mode .admin-app .admin-dashboard .card {
+  border-color:#293c5b;
+  background:#15243b;
+}
+body.dark-mode .admin-app .admin-dashboard .card h3 { color:#e3ecfa !important; }
+@media (max-width: 1000px) {
+  .admin-app .admin-dashboard .stats-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media (max-width: 767px) {
+  .admin-app .topbar-left { padding-left:34px; }
+  .admin-app .topbar-name { font-size:.8rem; }
+  .admin-app .main { padding:18px 12px calc(82px + env(safe-area-inset-bottom)); }
+  .admin-app .admin-dashboard-header {
+    align-items:flex-start;
+    flex-direction:column;
+    gap:10px;
+    margin-bottom:16px;
+    padding:18px;
+  }
+  .admin-dashboard-header-meta { justify-items:start; text-align:left; }
+  .admin-app .admin-dashboard-header-meta [aria-label="Current date and time"] { justify-content:flex-start; }
+  .admin-app .admin-dashboard .stats-grid { gap:10px; }
+  .admin-app .admin-dashboard .dashboard-stat-card { padding:14px; }
+  .admin-app .admin-dashboard .dashboard-stat-card .stat-icon { top:12px; right:12px; }
+  .admin-app .admin-dashboard .dashboard-stat-card .stat-value { font-size:1.55rem; }
+}
 `;
 
 function DashboardDateTime() {
@@ -3247,36 +3626,71 @@ function DashboardDateTime() {
 
 // DASHBOARD (Admin)
 function AdminDashboard({
+  userName,
   studentsData,
-  schoolsData,
-  pendingRows,
-  confirmedRows,
+  registeredSchools,
   financeSummary,
   recentActivity,
   isLoading,
 }) {
   const { cfg } = useContext(SettingsContext);
-  const schoolCount = Array.isArray(schoolsData) ? schoolsData.length : 0;
-  const totalStudents = Array.isArray(studentsData) ? studentsData.length : 0;
-  const pendingCount = pendingRows?.length || 0;
-  const confirmedCount = confirmedRows?.length || 0;
-  const placementCounts = (confirmedRows?.length ? confirmedRows : []).reduce(
-    (acc, row) => {
-      const cat = String(row.category || "C").toUpperCase();
-      if (cat === "A" || cat === "B" || cat === "C") acc[cat] += 1;
-      return acc;
+  const students = Array.isArray(studentsData) ? studentsData : [];
+  const registeredSchoolsList = Array.isArray(registeredSchools)
+    ? registeredSchools
+    : [];
+  const totalStudents = students.length;
+  const registeredRegionCount = new Set(
+    registeredSchoolsList
+      .map((school) =>
+        String(school.region || "").trim().toLocaleLowerCase()
+          .replace(/\s+region$/, "")
+          .replace(/\s+/g, " "),
+      )
+      .filter((region) => region && region !== "unknown"),
+  ).size;
+  const registeredSchoolNames = new Map(
+    registeredSchoolsList.map((school) => [String(school.id), school.name]),
+  );
+  const studentSchoolCount = new Set(
+    students
+      .map((student) => {
+        const linkedSchool = student.registered_school_id == null
+          ? ""
+          : registeredSchoolNames.get(String(student.registered_school_id));
+        return String(student.institution || student.school_name || linkedSchool || "")
+          .trim()
+          .toLocaleLowerCase();
+      })
+      .filter(Boolean),
+  ).size;
+  const studentLevels = students.reduce(
+    (counts, student) => {
+      const studentClass = String(student.class || student.class_name || "");
+      if (/\bjhs\b|\bjunior\s+high\b|\bbasic\s*[789]\b/i.test(studentClass)) {
+        counts.jhs += 1;
+      } else if (/\bshs\b|\bsenior\s+high\b/i.test(studentClass)) {
+        counts.shs += 1;
+      } else if (/\b(university|universit|tertiary|college|level\s*\d+)\b/i.test(studentClass)) {
+        counts.universities += 1;
+      }
+      return counts;
     },
-    { A: 0, B: 0, C: 0 },
+    { jhs: 0, shs: 0, universities: 0 },
   );
   return (
-    <div className="fade-in">
-      <div className="page-header">
-        <div className="page-title">Dashboard</div>
-        <div className="page-sub">
-          Academic Year {cfg.academicYear} &mdash; {cfg.currentTerm} &mdash;
-          Welcome back! Here's what's happening today.
+    <div className="fade-in admin-dashboard">
+      <div className="page-header admin-dashboard-header">
+        <div>
+          <div className="admin-dashboard-eyebrow">Campus Ghana · Administration</div>
+          <div className="page-title">Welcome back, {userName || "Admin"}</div>
+          <div className="page-sub">Here’s what’s happening across your campus today.</div>
         </div>
-        <DashboardDateTime />
+        <div className="admin-dashboard-header-meta">
+          <DashboardDateTime />
+          <div className="admin-dashboard-period">
+            Academic Year {cfg.academicYear} · {cfg.currentTerm}
+          </div>
+        </div>
       </div>
       <div className="stats-grid">
         {[
@@ -3288,51 +3702,55 @@ function AdminDashboard({
               : "Live student records",
             icon: "students",
             ic: "#0059ff",
-            bgStart: "#eff5ff",
-            bgEnd: "#9cc2ff",
+            bgStart: "#f0f7ff",
+            bgEnd: "#dcecff",
             text: "#0039a6",
             border: "rgba(0,89,255,.22)",
-            glow: "rgba(191,219,254,.98)",
-            shadow: "rgba(0,89,255,.28)",
+            glow: "rgba(96,165,250,.34)",
+            shadow: "rgba(37,99,235,.13)",
           },
           {
-            label: "Pending Selections",
-            value: String(pendingCount),
-            sub: "Awaiting review",
+            label: "Schools Students Are From",
+            value: String(studentSchoolCount),
+            sub: "Distinct schools represented",
             icon: "pending",
             ic: "#ff7a00",
-            bgStart: "#fff4e8",
-            bgEnd: "#ffc47a",
+            bgStart: "#fff8ed",
+            bgEnd: "#ffedd3",
             text: "#a54800",
             border: "rgba(255,122,0,.24)",
-            glow: "rgba(255,221,181,.98)",
-            shadow: "rgba(255,122,0,.26)",
+            glow: "rgba(251,146,60,.32)",
+            shadow: "rgba(234,124,32,.13)",
           },
           {
-            label: "Confirmed Mock Placements",
-            value: String(confirmedCount),
-            sub: "Approved mock placements",
+            label: "Students by Level",
+            levels: [
+              { label: "JHS", value: studentLevels.jhs },
+              { label: "SHS", value: studentLevels.shs },
+              { label: "Universities", value: studentLevels.universities },
+            ],
+            sub: "Students by education level",
             icon: "confirmed",
             ic: "#00b86b",
-            bgStart: "#ecfff5",
-            bgEnd: "#92f0c2",
+            bgStart: "#effcf5",
+            bgEnd: "#d5f5e3",
             text: "#007a46",
             border: "rgba(0,184,107,.22)",
-            glow: "rgba(187,247,208,.98)",
-            shadow: "rgba(0,184,107,.24)",
+            glow: "rgba(52,211,153,.3)",
+            shadow: "rgba(16,150,87,.13)",
           },
           {
-            label: "Schools Available",
-            value: schoolCount,
-            sub: isLoading ? "Loading school records..." : "Across all regions",
+            label: "Regions Registered",
+            value: String(registeredRegionCount),
+            sub: isLoading ? "Loading registered schools..." : "Distinct registered regions",
             icon: "schools",
             ic: "#c026ff",
-            bgStart: "#fdf0ff",
-            bgEnd: "#efadff",
+            bgStart: "#faf5ff",
+            bgEnd: "#eee5ff",
             text: "#8610b3",
             border: "rgba(192,38,255,.22)",
-            glow: "rgba(243,205,255,.98)",
-            shadow: "rgba(192,38,255,.24)",
+            glow: "rgba(192,132,252,.32)",
+            shadow: "rgba(147,51,234,.13)",
           },
         ].map((s) => (
           <div
@@ -3352,8 +3770,19 @@ function AdminDashboard({
               <Ico name={s.icon} size={20} color={s.ic} />
             </div>
             <div className="stat-label">{s.label}</div>
-            <div className="stat-value">{s.value}</div>
-            <div className="stat-sub">{s.sub}</div>
+            {s.levels ? (
+              <div className="admin-level-counts">
+                {s.levels.map((level) => (
+                  <div className="admin-level-count" key={level.label}>
+                    <strong>{level.value}</strong>
+                    <span>{level.label}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="stat-value">{s.value}</div>
+            )}
+            <div className="stat-sub">{isLoading && s.levels ? "Loading student records..." : s.sub}</div>
           </div>
         ))}
       </div>
@@ -3410,29 +3839,26 @@ function AdminDashboard({
         </div>
         <div className="card card-padded">
           <h3 style={{ fontWeight: 700, marginBottom: 16, fontSize: "1rem" }}>
-            Mock Placement Summary
+            Education Level Breakdown
           </h3>
           {[
             {
-              cat: "Category A",
-              count: placementCounts.A,
-              color: "#92400e",
-              bg: "#fef3c7",
+              label: "JHS",
+              count: studentLevels.jhs,
+              color: "#2563eb",
             },
             {
-              cat: "Category B",
-              count: placementCounts.B,
-              color: "#1e40af",
-              bg: "#dbeafe",
+              label: "SHS",
+              count: studentLevels.shs,
+              color: "#ea580c",
             },
             {
-              cat: "Category C",
-              count: placementCounts.C,
-              color: "#166534",
-              bg: "#dcfce7",
+              label: "Universities",
+              count: studentLevels.universities,
+              color: "#9333ea",
             },
-          ].map((c) => (
-            <div key={c.cat} style={{ marginBottom: 12 }}>
+          ].map((level) => (
+            <div key={level.label} style={{ marginBottom: 12 }}>
               <div
                 style={{
                   display: "flex",
@@ -3441,24 +3867,24 @@ function AdminDashboard({
                 }}
               >
                 <span style={{ fontWeight: 600, fontSize: ".85rem" }}>
-                  {c.cat}
+                  {level.label}
                 </span>
                 <span
                   style={{
-                    color: c.color,
+                    color: level.color,
                     fontWeight: 700,
                     fontSize: ".85rem",
                   }}
                 >
-                  {c.count}
+                  {level.count}
                 </span>
               </div>
               <div className="progress">
                 <div
                   className="progress-bar"
                   style={{
-                    width: `${confirmedCount ? (c.count / confirmedCount) * 100 : 0}%`,
-                    background: c.color,
+                    width: `${totalStudents ? (level.count / totalStudents) * 100 : 0}%`,
+                    background: level.color,
                   }}
                 />
               </div>
@@ -3592,6 +4018,8 @@ const normalizeStudentRecord = (student = {}, fallbackIndex = 0) => {
     // aggregate removed
     status: student.status || "pending",
     email: student.email || null,
+    institution: student.institution || student.school_name || student.school || "",
+    school_name: student.school_name || student.school || "",
     parent_contact: normalizedParentContact,
     photo_url: resolveStudentPhotoUrl(student),
     registered_school_id: student.registered_school_id ?? null,
@@ -5704,7 +6132,7 @@ function EnrollPage({ onBack, registeredSchoolId = null, onEnrolled = null, regi
           );
         } else {
           setLoginSetupMessage(
-            "Student login is ready. Sign in with the 12-digit Student ID and the parent/guardian contact on record. The student should change the temporary password after first sign-in.",
+            "Student login is ready. Sign in with the Student ID and the parent/guardian contact on record. The student should change the temporary password after first sign-in.",
           );
         }
       }
@@ -14522,6 +14950,7 @@ function StudentDashboard({
   selectionInfo,
   scoreValues,
   onOpenLearningLibrary,
+  onOpenCourses,
 }) {
   const { cfg } = useContext(SettingsContext);
   const student = studentData || {
@@ -14530,6 +14959,7 @@ function StudentDashboard({
     class: "-",
     region: "-",
   };
+  const studentVerified = String(student?.status || "").toLowerCase() === "confirmed";
   const avatarInitials = (user?.name || student?.full_name || "K")
     .split(" ")
     .slice(0, 2)
@@ -14599,7 +15029,17 @@ function StudentDashboard({
           )}
         </div>
         <div>
-          <div className="profile-name">{user?.name || student.full_name}</div>
+          <div className="profile-name">
+            {user?.name || student.full_name}
+            {studentVerified && (
+              <img
+                className="student-verified-badge"
+                src="/student-verified-badge.png"
+                alt="Verified student"
+                title="Verified student"
+              />
+            )}
+          </div>
           <div className="profile-role">
             Student ID: {student.index} - {student.class}
           </div>
@@ -14715,9 +15155,14 @@ function StudentDashboard({
           <h3>Ready to study?</h3>
           <p>Find BECE preparation, WASSCE lessons, and university course materials selected for your learning level.</p>
         </div>
-        <button className="btn btn-blue" type="button" onClick={onOpenLearningLibrary}>
-          Open learning library
-        </button>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+          <button className="btn btn-blue" type="button" onClick={onOpenCourses}>
+            Browse courses
+          </button>
+          <button className="btn btn-outline" type="button" onClick={onOpenLearningLibrary}>
+            Open learning library
+          </button>
+        </div>
       </section>
       <div className="card card-padded" style={{ marginTop: 12 }}>
         <h3 style={{ fontWeight: 700, marginBottom: 12 }}>Announcements</h3>
@@ -14768,8 +15213,8 @@ function StudentProfile({ user, studentData }) {
   const supportEmail = cfg.supportEmail || "support@campusghana.edu";
   const supportPhone = cfg.supportPhone || "+233 00 000 0000";
   const changePassword = async () => {
-    if (newPassword.length < 8) {
-      setPasswordMessage("Choose a password with at least 8 characters.");
+    if (newPassword.length < 10) {
+      setPasswordMessage("Choose a password with at least 10 characters.");
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -14809,8 +15254,7 @@ function StudentProfile({ user, studentData }) {
           Change Password
         </div>
         <p className="page-sub">
-          Your first password is the parent or guardian contact on your school record.
-          Change it to a private password that only you know.
+          Keep your password private. If your school created your account with a temporary password, change it now.
         </p>
         <div className="form-grid">
           <div className="form-group">
@@ -14822,6 +15266,7 @@ function StudentProfile({ user, studentData }) {
               className="form-control"
               type="password"
               autoComplete="new-password"
+              minLength={10}
               value={newPassword}
               onChange={(event) => setNewPassword(event.target.value)}
             />
@@ -14876,6 +15321,14 @@ function StudentProfile({ user, studentData }) {
           <div>
             <div className="student-profile-title">
               {student.full_name || user?.name || "Student"}
+              {String(student.status || "").toLowerCase() === "confirmed" && (
+                <img
+                  className="student-verified-badge"
+                  src="/student-verified-badge.png"
+                  alt="Verified student"
+                  title="Verified student"
+                />
+              )}
             </div>
             <div className="student-profile-meta">
               Student ID: {student.index || "-"} • {student.class || "-"} •{" "}
@@ -14894,14 +15347,22 @@ function StudentProfile({ user, studentData }) {
         <section className="student-profile-grid">
           <article className="student-profile-card">
             <div className="student-profile-card-head">
-              <h3>Personal And Academic Details</h3>
-              <span className="badge badge-blue">Verified</span>
+              <h3>Personal &amp; Academic</h3>
+              {String(student.status || "").toLowerCase() === "confirmed" ? (
+                <span className="badge badge-success">Confirmed</span>
+              ) : (
+                <span className="badge badge-warning">Pending Verification</span>
+              )}
             </div>
             <div className="student-profile-card-body">
               <div className="student-profile-list">
                 <div className="student-profile-row">
                   <label>Full Name</label>
                   <span>{student.full_name || user?.name || "-"}</span>
+                </div>
+                <div className="student-profile-row">
+                  <label>Display Name</label>
+                  <span>{student.display_name || "-"}</span>
                 </div>
                 <div className="student-profile-row">
                   <label>Student ID</label>
@@ -14916,6 +15377,14 @@ function StudentProfile({ user, studentData }) {
                   <span>{student.region || "-"}</span>
                 </div>
                 <div className="student-profile-row">
+                  <label>District</label>
+                  <span>{student.district || "-"}</span>
+                </div>
+                <div className="student-profile-row">
+                  <label>Institution or School</label>
+                  <span>{student.institution || "-"}</span>
+                </div>
+                <div className="student-profile-row">
                   <label>Gender</label>
                   <span>{student.gender || "-"}</span>
                 </div>
@@ -14927,63 +15396,14 @@ function StudentProfile({ user, studentData }) {
                           const dt = new Date(student.date_of_birth);
                           if (isNaN(dt.getTime())) return student.date_of_birth;
                           return dt.toLocaleDateString(undefined, {
-                            weekday: "long",
                             year: "numeric",
-                            month: "long",
+                            month: "short",
                             day: "numeric",
                           });
                         })()
                       : "-"}
                   </span>
                 </div>
-              </div>
-            </div>
-          </article>
-
-          <article className="student-profile-card">
-            <div className="student-profile-card-head">
-              <h3>Contact & Address</h3>
-            </div>
-            <div className="student-profile-card-body">
-              <div className="student-profile-list">
-                <div className="student-profile-row">
-                  <label>Parent Contact</label>
-                  <span>{student.parent_contact || "-"}</span>
-                </div>
-                <div className="student-profile-row">
-                  <label>Personal Contact</label>
-                  <span>{student.personal_contact || "-"}</span>
-                </div>
-                <div className="student-profile-row">
-                  <label>Home Address</label>
-                  <span>{student.home_address || "-"}</span>
-                </div>
-              </div>
-            </div>
-          </article>
-
-          <article className="student-profile-card">
-            <div className="student-profile-card-head">
-              <h3>More Details</h3>
-            </div>
-            <div className="student-profile-card-body">
-              <div className="student-profile-list">
-                <div className="student-profile-row">
-                  <label>Home Town</label>
-                  <span>{student.home_town || "-"}</span>
-                </div>
-                <div className="student-profile-row">
-                  <label>Place of Residence</label>
-                  <span>{student.place_of_residence || "-"}</span>
-                </div>
-                <div className="student-profile-row">
-                  <label>Postal Town</label>
-                  <span>{student.postal_town || "-"}</span>
-                </div>
-                <div className="student-profile-row">
-                  <label>PO Box</label>
-                  <span>{student.po_box || "-"}</span>
-                </div>
                 <div className="student-profile-row">
                   <label>Aggregate</label>
                   <span>
@@ -14996,7 +15416,7 @@ function StudentProfile({ user, studentData }) {
 
           <article className="student-profile-card">
             <div className="student-profile-card-head">
-              <h3>Contact & Address</h3>
+              <h3>Contact</h3>
             </div>
             <div className="student-profile-card-body">
               <div className="student-profile-list">
@@ -15008,6 +15428,20 @@ function StudentProfile({ user, studentData }) {
                   <label>Personal Contact</label>
                   <span>{student.personal_contact || "-"}</span>
                 </div>
+                <div className="student-profile-row">
+                  <label>Email</label>
+                  <span>{student.contact_email || "-"}</span>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article className="student-profile-card">
+            <div className="student-profile-card-head">
+              <h3>Address &amp; Residence</h3>
+            </div>
+            <div className="student-profile-card-body">
+              <div className="student-profile-list">
                 <div className="student-profile-row">
                   <label>Home Address</label>
                   <span>{student.home_address || "-"}</span>
@@ -15028,20 +15462,13 @@ function StudentProfile({ user, studentData }) {
                   <label>PO Box</label>
                   <span>{student.po_box || "-"}</span>
                 </div>
-                <div className="student-profile-row">
-                  <label>Aggregate</label>
-                  <span>
-                    {Number.isFinite(aggregateValue) ? aggregateValue : "-"}
-                  </span>
-                </div>
               </div>
             </div>
-            {/* Edit mode removed: read-only profile fields only */}
           </article>
 
           <article className="student-profile-card">
             <div className="student-profile-card-head">
-              <h3>Support And Readiness</h3>
+              <h3>Support &amp; Readiness</h3>
               <span className="badge badge-success">Live</span>
             </div>
             <div className="student-profile-card-body">
@@ -21435,6 +21862,7 @@ const ADMIN_NAV = [
   { key: "results", icon: "results", label: "Results", color: "#f97316" },
   { key: "grading", icon: "grading", label: "Grade Report", color: "#ec4899" },
   { key: "study-content", icon: "docs", label: "Learning Library", color: "#10b981" },
+  { key: "courses", icon: "docs", label: "Courses", color: "#0891b2" },
   { key: "analytics", icon: "analytics", label: "Analytics", color: "#7c3aed" },
   { section: "Fees & Finance" },
   { key: "fees", icon: "fees", label: "Fees", color: "#22c55e" },
@@ -21555,6 +21983,7 @@ const SCHOOL_ADMIN_NAV = (() => {
 const StudentStudyContentPage = lazy(() =>
   import("./src/components/StudentStudyContentPage.jsx"),
 );
+const CoursesPage = lazy(() => import("./src/components/CoursesPage.jsx"));
 function StudentStudyGroupsPage({ user, studentData }) {
   const [groups, setGroups] = useState([]);
   const [myGroups, setMyGroups] = useState([]);
@@ -22162,6 +22591,7 @@ const STUDENT_NAV = [
   { key: "exam-schedule", icon: "events", label: "Exam Schedule", color: "#0369a1" },
   { key: "live-tests", icon: "quiz", label: "Quizzes & Tests", color: "#f59e0b" },
   { key: "study-content", icon: "docs", label: "Study Materials", color: "#10b981" },
+  { key: "courses", icon: "docs", label: "Courses", color: "#0891b2" },
   { section: "Mock Placement" },
   { key: "selection", icon: "selection", label: "Select Schools", color: "#06b6d4" },
   { key: "my-selection", icon: "confirmed", label: "My Selection", color: "#16a34a" },
@@ -22207,7 +22637,13 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
   const [tab, setTab] = useState(() =>
     readAvailableTab(ADMIN_TAB_KEY, ADMIN_NAV),
   );
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const mainContentRef = useRef(null);
+  useEffect(() => {
+    mainContentRef.current?.scrollTo({ top: 0, behavior: "auto" });
+  }, [tab]);
+  const [sidebarOpen, setSidebarOpen] = useState(
+    () => typeof window !== "undefined" && window.innerWidth >= 768,
+  );
   const [notificationCount, setNotificationCount] = useState(0);
   const [adminStudents, setAdminStudents] = useState(() =>
     supabase ? [] : sortStudentsByIndex(STUDENTS_DATA),
@@ -23065,10 +23501,9 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
     const pages = {
       dashboard: (
         <AdminDashboard
+          userName={user?.name}
           studentsData={adminStudents}
-          schoolsData={adminSchools}
-          pendingRows={pendingSelections}
-          confirmedRows={confirmedSelections}
+          registeredSchools={registeredSchools}
           financeSummary={financeSummary}
           recentActivity={recentActivity}
           isLoading={loadingAdminData}
@@ -23115,6 +23550,11 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
         />
       ),
       "study-content": <StudyContentPage currentUser={user} />,
+      courses: (
+        <Suspense fallback={<div className="portal-loading" role="status">Loading courses...</div>}>
+          <CoursesPage mode="admin" />
+        </Suspense>
+      ),
       grading: <GradingPage />,
       fees: (
         <FeesAdmin
@@ -23195,7 +23635,7 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
   };
 
   return (
-    <div className="app">
+    <div className="app admin-app">
       <Topbar
         user={user}
         onLogout={onLogout}
@@ -23227,6 +23667,10 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
               src="https://image2url.com/r2/default/images/1773576400522-25d9d22b-3e79-4a9a-adc2-eae0031fbfe1.png"
               alt="Campus Ghana"
             />
+            <span className="admin-sidebar-brand-copy">
+              <strong>Campus Ghana</strong>
+              <small>ADMIN PORTAL</small>
+            </span>
           </button>
           {/* Pending Selections Sidebar Preview */}
           {pendingSelections.length > 0 && (
@@ -23419,6 +23863,7 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
           })}
         </nav>
         <main
+          ref={mainContentRef}
           className={`main ${sidebarOpen ? "" : "full"}`}
           onClick={handleMainBlankClick}
         >
@@ -23482,6 +23927,10 @@ function SchoolAdminPortal({ user, onLogout, darkMode, onToggleDark }) {
   const [tab, setTab] = useState(() =>
     readAvailableTab(SCHOOL_ADMIN_TAB_KEY, SCHOOL_ADMIN_NAV),
   );
+  const mainContentRef = useRef(null);
+  useEffect(() => {
+    mainContentRef.current?.scrollTo({ top: 0, behavior: "auto" });
+  }, [tab]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notificationCount, setNotificationCount] = useState(0);
   const [school, setSchool] = useState(null);
@@ -24269,6 +24718,11 @@ function SchoolAdminPortal({ user, onLogout, darkMode, onToggleDark }) {
           tableInfo={schoolResultsInfo}
         />
       ),
+      courses: (
+        <Suspense fallback={<div className="portal-loading" role="status">Loading courses...</div>}>
+          <CoursesPage mode="admin" />
+        </Suspense>
+      ),
       grading: <GradingPage />,
       finance: (
         <FinancePage
@@ -24456,6 +24910,7 @@ function SchoolAdminPortal({ user, onLogout, darkMode, onToggleDark }) {
           })}
         </nav>
         <main
+          ref={mainContentRef}
           className={`main ${sidebarOpen ? "" : "full"}`}
           onClick={handleMainBlankClick}
         >
@@ -24997,8 +25452,14 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
   const [tab, setTab] = useState(() =>
     readAvailableTab(STUDENT_TAB_KEY, STUDENT_NAV),
   );
+  const mainContentRef = useRef(null);
+  useEffect(() => {
+    mainContentRef.current?.scrollTo({ top: 0, behavior: "auto" });
+  }, [tab]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notificationCount, setNotificationCount] = useState(0);
+  const [studentNotifications, setStudentNotifications] = useState([]);
+  const [studentNotificationsError, setStudentNotificationsError] = useState("");
   const [schoolsData, setSchoolsData] = useState(SCHOOLS_DATA);
   const [studentData, setStudentData] = useState(null);
   const [attendanceData, setAttendanceData] = useState([]);
@@ -25032,6 +25493,9 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
     },
   ]);
   const totalChatUnread = chatUsers.reduce((sum, u) => sum + u.unread, 0);
+  const unreadStudentNotificationCount = studentNotifications.filter(
+    (notification) => !notification.is_read,
+  ).length;
   const blockedStudentNavKeys = useMemo(() => {
     const blocked = [];
     for (const item of STUDENT_NAV) {
@@ -25307,6 +25771,124 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
   ]);
 
   useEffect(() => {
+    if (!supabase || !user?.id) {
+      setStudentNotifications([]);
+      setStudentNotificationsError("");
+      return;
+    }
+
+    let active = true;
+    setStudentNotifications([]);
+    setStudentNotificationsError("");
+    const loadNotifications = async () => {
+      const { data, error } = await supabase
+        .from("student_notifications")
+        .select("id, notification_type, title, message, is_read, created_at")
+        .eq("student_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(50);
+      if (error) {
+        if (active) {
+          setStudentNotificationsError(
+            `Profile updates could not be loaded: ${error.message}`,
+          );
+        }
+        return;
+      }
+      if (active) {
+        setStudentNotifications(data || []);
+        setStudentNotificationsError("");
+      }
+    };
+
+    loadNotifications().catch((error) => {
+      if (active) {
+        setStudentNotificationsError(
+          `Profile updates could not be loaded: ${error?.message || "Supabase request failed."}`,
+        );
+      }
+    });
+
+    const channel = supabase
+      .channel(`student-notifications-${user.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "student_notifications",
+          filter: `student_id=eq.${user.id}`,
+        },
+        (payload) => {
+          const notification = payload.new;
+          if (notification.notification_type === "profile_confirmed") {
+            setStudentData((current) =>
+              current ? { ...current, status: "confirmed" } : current,
+            );
+          }
+          setStudentNotifications((current) =>
+            current.some((item) => item.id === notification.id)
+              ? current
+              : [notification, ...current].slice(0, 50),
+          );
+        },
+      )
+      .subscribe((status) => {
+        if (status === "CHANNEL_ERROR") {
+          setStudentNotificationsError(
+            "Live profile updates are unavailable. Refresh Announcements to check for new updates.",
+          );
+        }
+      });
+
+    return () => {
+      active = false;
+      void supabase.removeChannel(channel);
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (tab !== "announcements" || !supabase || !user?.id) return;
+    const unreadIds = studentNotifications
+      .filter((notification) => !notification.is_read)
+      .map((notification) => notification.id);
+    if (!unreadIds.length) return;
+
+    let active = true;
+    supabase
+      .from("student_notifications")
+      .update({ is_read: true })
+      .in("id", unreadIds)
+      .then(({ error }) => {
+        if (!active) return;
+        if (error) {
+          setStudentNotificationsError(
+            `Profile updates could not be marked as read: ${error.message}`,
+          );
+          return;
+        }
+        setStudentNotifications((current) =>
+          current.map((notification) =>
+            unreadIds.includes(notification.id)
+              ? { ...notification, is_read: true }
+              : notification,
+          ),
+        );
+      })
+      .catch((error) => {
+        if (active) {
+          setStudentNotificationsError(
+              `Profile updates could not be marked as read: ${error?.message || "Supabase request failed."}`,
+          );
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [studentNotifications, tab, user?.id]);
+
+  useEffect(() => {
     if (tab === "my-selection") {
       markSelectionApprovalSeen();
     }
@@ -25370,6 +25952,7 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
           }}
           scoreValues={scoreValues}
           onOpenLearningLibrary={() => goTab("study-content")}
+          onOpenCourses={() => goTab("courses")}
         />
       ),
       profile: <StudentProfile user={user} studentData={studentData} />,
@@ -25378,6 +25961,11 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
       "study-content": (
         <Suspense fallback={<div className="portal-loading" role="status">Loading learning library...</div>}>
           <StudentStudyContentPage studentData={studentData} />
+        </Suspense>
+      ),
+      courses: (
+        <Suspense fallback={<div className="portal-loading" role="status">Loading courses...</div>}>
+          <CoursesPage mode="student" studentData={studentData} />
         </Suspense>
       ),
       attendance: <StudentAttendance attendanceData={attendanceData} />,
@@ -25392,6 +25980,32 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
               {appCfg.smsNotifs ? "SMS" : "In-app"}
             </div>
           </div>
+          {studentNotificationsError && (
+            <div className="alert alert-danger" role="alert">
+              {studentNotificationsError}
+            </div>
+          )}
+          {studentNotifications.map((notification) => (
+            <div
+              key={notification.id}
+              className="card card-padded"
+              style={{
+                marginBottom: 12,
+                borderLeft: "4px solid #16a34a",
+                background: notification.is_read ? undefined : "#f0fdf4",
+              }}
+            >
+              <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                {notification.title}
+              </div>
+              <div style={{ color: "#475569", fontSize: ".9rem" }}>
+                {notification.message}
+              </div>
+              <div style={{ fontSize: ".78rem", color: "#94a3b8", marginTop: 6 }}>
+                {new Date(notification.created_at).toLocaleString()}
+              </div>
+            </div>
+          ))}
           {approvalInfo.isApproved && (
             <div
               className="card card-padded"
@@ -25525,7 +26139,7 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
         onOpenNotifications={openNotifications}
         onOpenProfile={() => goTab("profile")}
         onReloadApp={reloadApp}
-        notificationCount={notificationCount}
+        notificationCount={notificationCount + unreadStudentNotificationCount}
         chatUnread={totalChatUnread}
         onOpenChat={() => goTab("chat")}
         systemName={appCfg.systemName}
@@ -25645,7 +26259,11 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
             );
           })}
         </nav>
-        <main className={`main full`} onClick={handleMainBlankClick}>
+        <main
+          ref={mainContentRef}
+          className={`main ${sidebarOpen ? "" : "full"}`}
+          onClick={handleMainBlankClick}
+        >
           {appCfg.maintenanceMode && (
             <div
               className="alert alert-warning"
@@ -25702,6 +26320,7 @@ function GhanaCampus() {
   const [darkMode, setDarkMode] = useState(false);
   const [appSettings, setAppSettings] = useState(DEFAULT_SETTINGS);
   const authRestoreRequestRef = useRef(0);
+  const authUserId = session?.user?.authUserId;
 
   const hydrateSessionFromSupabase = useCallback(async (eventUser) => {
     const requestId = ++authRestoreRequestRef.current;
@@ -25744,15 +26363,6 @@ function GhanaCampus() {
         return;
       }
 
-      const { data: preferenceRow, error: preferenceError } = await supabase
-        .from("user_preferences")
-        .select("preferences")
-        .eq("user_id", authUser.id)
-        .maybeSingle();
-      if (preferenceError) {
-        console.error("Could not load account preferences:", preferenceError.message);
-      }
-
       const displayName =
         profile.full_name ||
         authUser.user_metadata?.full_name ||
@@ -25764,7 +26374,7 @@ function GhanaCampus() {
       if (role === "student") {
         const { data, error: studentError } = await supabase
           .from("students")
-          .select("id, index_number, index, full_name")
+          .select("id, index_number, index, full_name, display_name")
           .eq("auth_user_id", authUser.id)
           .maybeSingle();
         if (studentError || !data) {
@@ -25785,16 +26395,33 @@ function GhanaCampus() {
           authUserId: authUser.id,
           email: authUser.email,
           role,
-          name: studentRecord?.full_name || displayName,
+          name: studentRecord?.display_name || studentRecord?.full_name || displayName,
           index: studentRecord?.index_number || studentRecord?.index || "",
           registered_school_id: profile.registered_school_id ?? null,
           managed_school_name: profile.managed_school_name || "",
         },
       };
       if (!isCurrentRequest()) return;
-      setDarkMode(!!preferenceRow?.preferences?.dark_mode);
       setSession(restoredSession);
       writeAppSession(restoredSession);
+      void (async () => {
+        try {
+          const { data: preferenceRow, error: preferenceError } = await supabase
+            .from("user_preferences")
+            .select("preferences")
+            .eq("user_id", authUser.id)
+            .maybeSingle();
+          if (preferenceError) {
+            console.error("Could not load account preferences:", preferenceError.message);
+            return;
+          }
+          if (isCurrentRequest()) {
+            setDarkMode(!!preferenceRow?.preferences?.dark_mode);
+          }
+        } catch (error) {
+          console.error("Could not load account preferences:", error);
+        }
+      })();
     } catch (error) {
       if (!isCurrentRequest()) return;
       console.error("Could not restore the Supabase session:", error);
@@ -25848,9 +26475,12 @@ function GhanaCampus() {
     }
 
     if (portal === "student") {
-      const studentIndex = String(user.index || "").trim();
-      if (!/^\d{12}$/.test(studentIndex)) {
-        return { ok: false, error: "Enter a valid 12-digit student ID." };
+      const studentIndex = String(user.index || "").trim().toUpperCase();
+      if (!/^(?:CG-[A-Z]{2}\d{9,}|CG-\d{10}|\d{12})$/.test(studentIndex)) {
+        return {
+          ok: false,
+          error: "Enter a valid region-based CG- Student ID or a legacy 12-digit ID.",
+        };
       }
 
       const studentEmail =
@@ -25932,6 +26562,28 @@ function GhanaCampus() {
 
   };
 
+  const registerStudent = async (details) => {
+    if (!supabase) {
+      return { ok: false, error: "Supabase is not configured for account creation." };
+    }
+
+    const { data, error } = await supabase.functions.invoke("register-student", {
+      body: details,
+    });
+    if (error) {
+      let message = error.message || "Student account creation failed.";
+      if (error.context instanceof Response) {
+        const responseBody = await error.context.clone().json().catch(() => null);
+        if (typeof responseBody?.error === "string") message = responseBody.error;
+      }
+      return { ok: false, error: message };
+    }
+    if (!data?.student_id) {
+      return { ok: false, error: "The account was created without a Student ID. Contact support before trying again." };
+    }
+    return { ok: true, studentId: data.student_id };
+  };
+
 
   const logout = () => {
     if (supabase) supabase.auth.signOut();
@@ -25953,7 +26605,7 @@ function GhanaCampus() {
 
   useEffect(() => {
     const loadSettings = async () => {
-      if (!supabase) return;
+      if (!supabase || !authUserId) return;
       const { data } = await supabase
         .from("app_settings")
         .select("config")
@@ -25986,7 +26638,7 @@ function GhanaCampus() {
       setAppSettings((s) => ({ ...DEFAULT_SETTINGS, ...s, ...mergedSettings }));
     };
     loadSettings();
-  }, []);
+  }, [authUserId]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -26017,7 +26669,8 @@ function GhanaCampus() {
         <Suspense fallback={<div className="portal-loading" role="status">Loading sign-in...</div>}>
           <Landing
             onSelect={(portal, user, password) => login(portal, user, password)}
-          />
+              onCreateAccount={(details) => registerStudent(details)}
+            />
         </Suspense>
       ) : session.portal === "admin" ? (
         <AdminPortal

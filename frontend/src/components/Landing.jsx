@@ -1,9 +1,14 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Ico } from "./Ico.jsx";
 import "./Landing.module.css";
 
-export function Landing({ onSelect }) {
+const StudentSignup = lazy(() =>
+  import("./StudentSignup.jsx").then((module) => ({ default: module.StudentSignup })),
+);
+
+export function Landing({ onSelect, onCreateAccount }) {
   const [mode, setMode] = useState("admin");
+  const [signupMode, setSignupMode] = useState(false);
   const [email, setEmail] = useState("");
   const [pwd, setPwd] = useState("");
   const [studentIndex, setStudentIndex] = useState("");
@@ -53,9 +58,11 @@ export function Landing({ onSelect }) {
 
   const handle = async (event) => {
     event.preventDefault();
+    const normalizedStudentId =
+      mode === "student" ? studentIndex.trim().toUpperCase() : "";
     if (mode === "student") {
-      if (!/^\d{12}$/.test(studentIndex)) {
-        setErr("Enter your 12-digit student ID.");
+      if (!/^(?:CG-[A-Z]{2}\d{9,}|CG-\d{10}|\d{12})$/.test(normalizedStudentId)) {
+        setErr("Enter your region-based CG- Student ID or your legacy 12-digit ID.");
         return;
       }
       if (!pwd) {
@@ -70,7 +77,7 @@ export function Landing({ onSelect }) {
     setLoading(true);
     try {
       if (mode === "student") {
-        const result = await onSelect(mode, { index: studentIndex }, pwd);
+        const result = await onSelect(mode, { index: normalizedStudentId }, pwd);
         if (!result?.ok) setErr(result?.error || "Student sign in failed.");
         return;
       }
@@ -96,8 +103,8 @@ export function Landing({ onSelect }) {
   };
 
   return (
-    <div className="landing">
-      <div className="landing-box">
+    <div className={`landing${signupMode ? " landing-signup" : ""}`}>
+      <div className={`landing-box${signupMode ? " signup-box" : ""}`}>
         <div className="brand-mark">
           <div className="landing-logo"><img src="https://image2url.com/r2/default/images/1773576400522-25d9d22b-3e79-4a9a-adc2-eae0031fbfe1.png" alt="Campus Ghana" /></div>
         </div>
@@ -119,6 +126,21 @@ export function Landing({ onSelect }) {
             )}
           </div>
         )}
+        {signupMode ? (
+          <Suspense fallback={<div className="signup-loading" role="status">Loading account form...</div>}>
+            <StudentSignup
+              onCreateAccount={onCreateAccount}
+              onBackToLogin={(studentId) => {
+                setSignupMode(false);
+                setMode("student");
+                setStudentIndex(studentId || "");
+                setPwd("");
+                setErr("");
+              }}
+            />
+          </Suspense>
+        ) : (
+          <>
         <div className="login-portal-switch" role="group" aria-label="Choose sign-in portal">
           <button
             type="button"
@@ -146,14 +168,14 @@ export function Landing({ onSelect }) {
             <input
               className="form-input"
               type={mode === "student" ? "text" : "email"}
-              placeholder={mode === "student" ? "Student ID" : "Staff email"}
+              placeholder={mode === "student" ? "CG-AS011126001 or 12-digit ID" : "Staff email"}
               aria-label={mode === "student" ? "Student ID" : "Staff email"}
               value={mode === "student" ? studentIndex : email}
               onChange={(e) => mode === "student"
-                ? setStudentIndex(e.target.value.replace(/\D/g, "").slice(0, 12))
+                ? setStudentIndex(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, "").slice(0, 14))
                 : setEmail(e.target.value)}
-              maxLength={mode === "student" ? 12 : 254}
-              inputMode={mode === "student" ? "numeric" : "email"}
+              maxLength={mode === "student" ? 14 : 254}
+              inputMode={mode === "student" ? "text" : "email"}
               autoComplete="username"
             />
           </div>
@@ -163,8 +185,8 @@ export function Landing({ onSelect }) {
               className="form-input"
               type={showPwd ? "text" : "password"}
               data-has-toggle="true"
-              placeholder={mode === "student" ? "Parent/guardian contact" : "Password"}
-              aria-label={mode === "student" ? "Parent/guardian contact" : "Password"}
+              placeholder="Password"
+              aria-label="Password"
               value={pwd}
               onChange={(e) => setPwd(e.target.value)}
               maxLength={128}
@@ -181,7 +203,7 @@ export function Landing({ onSelect }) {
             </button>
           </div>
           <div className="login-help-row">
-            <span>{mode === "student" ? "Use your 12-digit Student ID" : "Secure staff access"}</span>
+            <span>{mode === "student" ? "Use your CG- ID or legacy 12-digit ID" : "Secure staff access"}</span>
             <span>Need help? Contact your school</span>
           </div>
           <button className="btn-primary" type="submit" disabled={loading}>
@@ -189,6 +211,23 @@ export function Landing({ onSelect }) {
             {!loading && <span className="login-submit-arrow" aria-hidden="true">→</span>}
           </button>
         </form>
+        {mode === "student" && (
+          <button
+            className="signup-link"
+            type="button"
+            onClick={() => { setSignupMode(true); setErr(""); }}
+            aria-label="New to Campus Ghana? Create a student account"
+          >
+            <span className="signup-link-copy">
+              <strong>New to Campus Ghana?</strong>
+              <span className="signup-link-action">Create a student account</span>
+              <span className="signup-link-note">Get started with your personalized learning library.</span>
+            </span>
+            <span className="signup-link-arrow" aria-hidden="true">→</span>
+          </button>
+        )}
+          </>
+        )}
         <div className="landing-footer">LEARN <span>•</span> IMPROVE <span>•</span> ACHIEVE</div>
       </div>
     </div>

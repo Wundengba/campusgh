@@ -10,7 +10,9 @@ import {
 
 export default function StudentStudyContentPage({ studentData }) {
   const studentClass = studentData?.class || studentData?.class_name || "";
-  const selectedLevel = getLearningLevelFromClass(studentClass);
+  const inferredLevel = getLearningLevelFromClass(studentClass);
+  const [levelOverride, setLevelOverride] = useState("");
+  const selectedLevel = inferredLevel || levelOverride;
   const learningLevel = LEARNING_LEVELS.find(
     (level) => level.key === selectedLevel,
   );
@@ -333,7 +335,7 @@ export default function StudentStudyContentPage({ studentData }) {
       <div className="page-header">
         <div className="page-title">{learningLevel ? `${learningLevel.label} Learning Library` : "Learning Library"}</div>
         <div className="page-sub">
-          {learningLevel?.description || "Your class is not set on your student record, so level-specific materials are hidden."}
+          {learningLevel?.description || "Choose your education level to browse its learning materials."}
         </div>
       </div>
       <section className="learning-hub-level-picker" aria-labelledby="learning-level-heading">
@@ -342,10 +344,25 @@ export default function StudentStudyContentPage({ studentData }) {
             <h2 id="learning-level-heading">Your learning path</h2>
             <p>
               {learningLevel
-                ? `Showing materials for ${learningLevel.name}${studentClass ? ` · ${studentClass}` : ""}.`
-                : "Ask your school administrator to add your class to your student record."}
+                ? `Showing all published materials for ${learningLevel.name}${studentClass ? ` · ${studentClass}` : ""}.`
+                : "Select your education level to see all materials published for that group."}
             </p>
           </div>
+          {!inferredLevel && (
+            <label>
+              <span>Education level</span>
+              <select
+                className="form-control"
+                value={levelOverride}
+                onChange={(event) => setLevelOverride(event.target.value)}
+              >
+                <option value="">Choose your level</option>
+                {LEARNING_LEVELS.map((level) => (
+                  <option key={level.key} value={level.key}>{level.name}</option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
       </section>
       {progressError && <div className="alert alert-warning">{progressError}</div>}

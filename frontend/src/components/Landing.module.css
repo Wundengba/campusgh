@@ -1,1 +1,122 @@
-/* Landing component styles */
+:global(.signup-link) {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 76px;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 13px 15px;
+  border: 1px solid #cbd9fb;
+  border-radius: 14px;
+  background: linear-gradient(110deg, #f3f7ff 0%, #fff 100%);
+  color: #172b52;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: .875rem;
+  line-height: 1.4;
+  text-align: left;
+  transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+
+:global(.signup-link:hover) {
+  transform: translateY(-1px);
+  border-color: #8eacf2;
+  box-shadow: 0 8px 20px rgb(34 81 186 / 10%);
+}
+
+:global(.signup-link:focus-visible) {
+  outline: 3px solid rgb(34 81 186 / 35%);
+  outline-offset: 3px;
+}
+
+:global(.signup-link-copy) {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 3px;
+}
+
+:global(.signup-link-copy strong) {
+  color: #53627d;
+  font-size: .72rem;
+  font-weight: 600;
+}
+
+:global(.signup-link-action) {
+  color: #1948a8;
+  font-size: .875rem;
+  font-weight: 750;
+  letter-spacing: -.015em;
+  line-height: 1.3;
+}
+
+:global(.signup-link-note) {
+  color: #74819a;
+  font-size: .66rem;
+  line-height: 1.4;
+}
+
+:global(.signup-link-arrow) {
+  display: grid;
+  flex: 0 0 32px;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 50%;
+  background: #e5edff;
+  color: #1948a8;
+  font-size: 1.1rem;
+  font-weight: 700;
+  transition: background .18s ease, color .18s ease;
+}
+
+:global(.signup-link:hover .signup-link-arrow) {
+  background: #2251ba;
+  color: #fff;
+}
+
+@media (max-width: 430px) {
+  :global(.signup-link) {
+    min-height: 70px;
+    gap: 9px;
+    margin-top: 13px;
+    padding: 11px 12px;
+  }
+
+  :global(.signup-link-copy strong) {
+    font-size: .7rem;
+  }
+
+  :global(.signup-link-action) {
+    font-size: .84rem;
+  }
+
+  :global(.signup-link-note) {
+    font-size: .62rem;
+  }
+
+  :global(.signup-link-arrow) {
+    flex-basis: 29px;
+    width: 29px;
+    height: 29px;
+  }
+}
+
+@media (max-width: 360px) {
+  :global(.signup-link-note) {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :global(.signup-link),
+  :global(.signup-link-arrow) {
+    transition: none;
+  }
+
+  :global(.signup-link:hover) {
+    transform: none;
+  }
+}

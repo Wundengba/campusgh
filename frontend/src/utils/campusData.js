@@ -28,7 +28,12 @@ export function normalizeSchoolRow(s, i = 0) {
     id: s?.id ?? i + 1,
     name: s?.name || s?.school_name || "Unnamed School",
     location: s?.location || s?.district || "",
-    region: s?.region || "Unknown",
+    region:
+      s?.region ||
+      s?.school_region ||
+      s?.region_name ||
+      s?.schoolRegion ||
+      "Unknown",
     category: String(s?.category || "C"),
     type: s?.type || s?.school_type || "Mixed",
     active: typeof s?.active === "boolean" ? s.active : true,

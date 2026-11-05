@@ -21867,6 +21867,7 @@ const ADMIN_NAV = [
   { section: "Fees & Finance" },
   { key: "fees", icon: "fees", label: "Fees", color: "#22c55e" },
   { section: "Communication" },
+  { key: "study-teams", icon: "chat", label: "Study Teams", color: "#7c3aed" },
   { key: "chat", icon: "chat", label: "Chat", color: "#10b981" },
   { key: "documents", icon: "docs", label: "Documents", color: "#7c2d12" },
   { section: "Administration" },
@@ -21984,6 +21985,7 @@ const StudentStudyContentPage = lazy(() =>
   import("./src/components/StudentStudyContentPage.jsx"),
 );
 const CoursesPage = lazy(() => import("./src/components/CoursesPage.jsx"));
+const StudyTeamsPage = lazy(() => import("./src/components/StudyTeamsPage.jsx"));
 function StudentStudyGroupsPage({ user, studentData }) {
   const [groups, setGroups] = useState([]);
   const [myGroups, setMyGroups] = useState([]);
@@ -22592,6 +22594,7 @@ const STUDENT_NAV = [
   { key: "live-tests", icon: "quiz", label: "Quizzes & Tests", color: "#f59e0b" },
   { key: "study-content", icon: "docs", label: "Study Materials", color: "#10b981" },
   { key: "courses", icon: "docs", label: "Courses", color: "#0891b2" },
+  { key: "study-teams", icon: "chat", label: "Study Teams", color: "#7c3aed" },
   { section: "Mock Placement" },
   { key: "selection", icon: "selection", label: "Select Schools", color: "#06b6d4" },
   { key: "my-selection", icon: "confirmed", label: "My Selection", color: "#16a34a" },
@@ -23553,6 +23556,11 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
       courses: (
         <Suspense fallback={<div className="portal-loading" role="status">Loading courses...</div>}>
           <CoursesPage mode="admin" />
+        </Suspense>
+      ),
+      "study-teams": (
+        <Suspense fallback={<div className="portal-loading" role="status">Loading study teams...</div>}>
+          <StudyTeamsPage user={user} />
         </Suspense>
       ),
       grading: <GradingPage />,
@@ -24721,6 +24729,11 @@ function SchoolAdminPortal({ user, onLogout, darkMode, onToggleDark }) {
       courses: (
         <Suspense fallback={<div className="portal-loading" role="status">Loading courses...</div>}>
           <CoursesPage mode="admin" />
+        </Suspense>
+      ),
+      "study-teams": (
+        <Suspense fallback={<div className="portal-loading" role="status">Loading study teams...</div>}>
+          <StudyTeamsPage user={user} />
         </Suspense>
       ),
       grading: <GradingPage />,
@@ -25966,6 +25979,11 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
       courses: (
         <Suspense fallback={<div className="portal-loading" role="status">Loading courses...</div>}>
           <CoursesPage mode="student" studentData={studentData} />
+        </Suspense>
+      ),
+      "study-teams": (
+        <Suspense fallback={<div className="portal-loading" role="status">Loading study teams...</div>}>
+          <StudyTeamsPage user={user} studentData={studentData} />
         </Suspense>
       ),
       attendance: <StudentAttendance attendanceData={attendanceData} />,

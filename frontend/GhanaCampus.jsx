@@ -1,5 +1,6 @@
 import { lazy, Suspense, useState, useEffect, useCallback, useContext, useMemo, useRef } from "react";
 import { supabase } from "./src/lib/supabaseClient.js";
+import { extractDocumentText, getDocumentTitle } from "./src/utils/documentImport.js";
 import { Ico } from "./src/components/Ico.jsx";
 import { Topbar } from "./src/components/Topbar.jsx";
 import { SettingsContext } from "./src/context/SettingsContext.js";
@@ -64,6 +65,12 @@ import {
 } from "./src/utils/sessionState.js";
 
 import { NotificationContext } from "./src/components/NotificationSystem.jsx";
+import { GHANA_DISTRICTS } from "./src/data/ghanaDistricts.js";
+import { resizeStudentPhoto } from "./src/utils/studentPhoto.js";
+import {
+  markProfilesTableUnavailable,
+  profilesTableAvailable,
+} from "./src/utils/profileTableState.js";
 
 const Landing = lazy(() =>
   import("./src/components/Landing.jsx").then((module) => ({
@@ -110,8 +117,21 @@ function getEventMessage(table, eventType, payload) {
   }
 }
 
-let profilesTableAvailable = true;
-
+const isUuidLikeValue = (value) => {
+  const text = String(value ?? "").trim();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(text);
+};
+const isPreviewStudentUser = (value) => {
+  const text = String(value ?? "").trim();
+  return (
+    !text ||
+    text === "demo-student" ||
+    text === "preview-student" ||
+    text.startsWith("preview-") ||
+    text.startsWith("local-") ||
+    !isUuidLikeValue(text)
+  );
+};
 const normalizeRoleKey = (value) =>
   String(value || "")
     .trim()
@@ -230,7 +250,7 @@ const css = `
   :root {
     --primary: #1a56db; --primary-d: #1e3a8a; --primary-l: #dbeafe;
     --accent: #0891b2; --success: #16a34a; --warning: #d97706; --danger: #dc2626;
-    --bg: #eef2ff; --surface: #fff; --border: #e2e8f0;
+    --bg: #dfeaf8; --surface: #fff; --border: #e2e8f0;
     --text: #0f172a; --text2: #475569; --text3: #94a3b8;
     --sidebar-w: 252px; --topbar-h: 66px;
     --font: 'Sora', sans-serif;
@@ -247,7 +267,39 @@ const css = `
     --shadow: 0 10px 30px rgba(2,6,23,.45);
   }
   * { box-sizing: border-box; margin:0; padding:0; }
-  body { font-family: var(--font); background: var(--bg); color: var(--text); overflow-x:hidden; -webkit-text-size-adjust:100%; }
+  body {
+    width: 100%;
+    min-width: 320px;
+    font-family: var(--font);
+    background:
+      radial-gradient(circle at 18% 10%, rgba(255,255,255,.95), rgba(255,255,255,0) 18%),
+      radial-gradient(circle at 80% 12%, rgba(255,255,255,.7), rgba(255,255,255,0) 18%),
+      linear-gradient(180deg, #dfeeff 0%, #dfeaf8 48%, #deebf9 100%);
+    color: var(--text);
+    overflow-x:hidden;
+    -webkit-text-size-adjust:100%;
+  }
+  #root {
+    width: 100%;
+    min-width: 0;
+  }
+  .app.admin-app.student-app {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 12px;
+    border-radius: 28px;
+    background: rgba(255,255,255,.22);
+    box-shadow: 0 18px 40px rgba(30,64,175,.12);
+    border: 1px solid rgba(255,255,255,.45);
+  }
+  .shell {
+    display:flex;
+    min-height: calc(100vh - 56px);
+    border-radius: 22px;
+    background: rgba(255,255,255,.12);
+    overflow:hidden;
+  }
   img { max-width:100%; height:auto; }
   input, select, textarea, button { font-family: var(--font); }
 
@@ -317,6 +369,31 @@ const css = `
   .landing-install-btn small { display:block; margin-top:2px; font-size:.76rem; line-height:1.45; color:rgba(255,255,255,.86); }
   .landing-install-help {
     padding:11px 12px; border-radius:14px; background:#f8fafc; border:1px solid #dbeafe; color:#475569; font-size:.78rem; line-height:1.5;
+  }
+  .feature-preview {
+    margin-top:18px; padding:14px 12px 12px; border:1px solid rgba(196,212,255,0.9); border-radius:18px;
+    background:linear-gradient(180deg, rgba(255,255,255,0.7), rgba(238,244,255,0.88)); box-shadow:0 14px 28px rgba(37,99,235,.06);
+  }
+  .feature-preview-header {
+    display:flex; align-items:center; gap:8px; margin-bottom:10px; font-weight:700; color:#1e3a8a;
+  }
+  .feature-preview-badge {
+    display:inline-flex; align-items:center; justify-content:center; padding:4px 8px; border-radius:999px; background:#dbeafe; color:#1d4ed8; font-size:.66rem; letter-spacing:.08em; text-transform:uppercase; }
+  .feature-preview-title { font-size:.72rem; letter-spacing:.08em; text-transform:uppercase; }
+  .feature-grid {
+    display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px;
+  }
+  .feature-card {
+    display:grid; gap:5px; padding:12px 10px; border-radius:14px; background:rgba(255,255,255,0.68); border:1px solid rgba(203,213,225,0.9); color:#1f2d3d; text-align:left;
+  }
+  .feature-card strong {
+    font-size:.8rem; font-weight:800; color:#17263f;
+  }
+  .feature-card small {
+    display:block; color:#53627d; font-size:.68rem; line-height:1.45;
+  }
+  .feature-icon {
+    display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; border-radius:10px; background:#dbeafe; font-size:1rem; box-shadow:inset 0 0 0 1px rgba(147,197,253,.75);
   }
   .portal-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:8px; }
   .portal-btn { padding:16px 14px; border-radius:14px; border:2px solid #e2e8f0; background:#f8fafc;
@@ -1685,7 +1762,7 @@ const css = `
 
   /* SCHOOL AND CLASS GROUPING */
   .school-group { margin-bottom: 24px; }
-  .school-header { 
+  .school-header {
     background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
     color: white;
     padding: 16px 20px;
@@ -1695,20 +1772,20 @@ const css = `
     align-items: center;
     margin-bottom: 8px;
   }
-  .school-name { 
-    font-size: 1.2rem; 
-    font-weight: 700; 
+  .school-name {
+    font-size: 1.2rem;
+    font-weight: 700;
     margin: 0;
   }
-  .school-count { 
-    font-size: 0.9rem; 
+  .school-count {
+    font-size: 0.9rem;
     opacity: 0.9;
     background: rgba(255,255,255,0.2);
     padding: 4px 12px;
     border-radius: 20px;
   }
   .class-group { margin-bottom: 16px; }
-  .class-header { 
+  .class-header {
     background: #f1f5f9;
     padding: 12px 16px;
     border-left: 4px solid #3b82f6;
@@ -1716,14 +1793,14 @@ const css = `
     justify-content: space-between;
     align-items: center;
   }
-  .class-name { 
-    font-size: 1rem; 
-    font-weight: 600; 
+  .class-name {
+    font-size: 1rem;
+    font-weight: 600;
     color: #1e40af;
     margin: 0;
   }
-  .class-count { 
-    font-size: 0.8rem; 
+  .class-count {
+    font-size: 0.8rem;
     color: #64748b;
     background: #e2e8f0;
     padding: 2px 8px;
@@ -1800,12 +1877,12 @@ const css = `
   .profile-role { opacity:.8; font-size:.875rem; margin-top:4px; }
   .student-verified-badge {
     display:inline-block;
-    width:28px;
-    height:28px;
+    width:19px;
+    height:19px;
     margin-left:7px;
-    object-fit:contain;
-    vertical-align:middle;
-    filter:drop-shadow(0 1px 2px rgba(15,23,42,.2));
+    vertical-align:-3px;
+    flex:none;
+    filter:drop-shadow(0 1px 1px rgba(15,23,42,.16));
   }
   .student-profile-shell { display:grid; gap:18px; }
   .student-profile-hero {
@@ -3360,11 +3437,11 @@ body.dark-mode .app .bottom-nav-item.active {
   margin-bottom:22px;
   padding:22px 24px;
   border:0;
-  border-radius:18px;
+  border-radius:20px;
   background:
     radial-gradient(circle at 88% 18%,rgba(255,255,255,.2),transparent 14rem),
-    linear-gradient(115deg,#2563eb 0%,#4f46e5 56%,#7c3aed 100%);
-  box-shadow:0 12px 26px rgba(67,83,205,.2);
+    linear-gradient(135deg,#d7eeff 0%, #8dc5ff 10%, #4c9ef5 40%, #276ae7 100%);
+  box-shadow:0 12px 26px rgba(37,99,235,.18);
   overflow:hidden;
 }
 .admin-dashboard-eyebrow {
@@ -3400,6 +3477,418 @@ body.dark-mode .app .bottom-nav-item.active {
   font-size:.78rem !important;
 }
 .admin-dashboard-period { color:rgba(255,255,255,.76); font-size:.72rem; font-weight:650; }
+.admin-dashboard-heading {
+  display:flex;
+  min-width:0;
+  align-items:center;
+  gap:15px;
+}
+.admin-dashboard-avatar {
+  display:grid;
+  width:54px;
+  height:54px;
+  flex:0 0 54px;
+  place-items:center;
+  border:1px solid #e6e9fb;
+  border-radius:16px;
+  background:linear-gradient(145deg,#eef1ff,#f7edff);
+  color:#6659d9;
+  font-size:1rem;
+  font-weight:850;
+  box-shadow:0 5px 12px rgba(82,102,220,.1);
+}
+.admin-dashboard-session {
+  display:grid;
+  gap:3px;
+  min-width:158px;
+  padding:9px 12px;
+  border:1px solid #e9eaf4;
+  border-radius:11px;
+  background:rgba(255,255,255,.8);
+  text-align:left;
+}
+.admin-dashboard-session span {
+  color:#929ab0;
+  font-size:.58rem;
+  font-weight:800;
+  letter-spacing:.1em;
+}
+.admin-dashboard-session strong { color:#26334f; font-size:.8rem; }
+.admin-dashboard-session small { color:#75809a; font-size:.7rem; }
+.student-dashboard-heading { min-width:0; }
+.student-dashboard-welcome {
+  display:flex;
+  align-items:center;
+  gap:14px;
+}
+.student-dashboard-avatar {
+  display:flex;
+  width:54px;
+  height:54px;
+  flex:0 0 54px;
+  align-items:center;
+  justify-content:center;
+  overflow:hidden;
+  border:2px solid rgba(255,255,255,.64);
+  border-radius:15px;
+  background:rgba(255,255,255,.18);
+  color:#fff;
+  font-size:1.05rem;
+  font-weight:800;
+  box-shadow:0 5px 12px rgba(20,35,90,.16);
+}
+.student-dashboard-avatar img {
+  width:100%;
+  height:100%;
+  object-fit:cover;
+}
+.student-dashboard-deadline {
+  margin:12px 0 0 68px;
+  color:#fff1c2;
+  font-size:.76rem;
+  font-weight:750;
+}
+.student-dashboard-shell {
+  display:grid;
+  grid-template-columns:minmax(260px,330px) minmax(0,1fr);
+  gap:20px;
+  align-items:start;
+  width:min(100%, 1080px);
+  margin:0 auto;
+}
+.student-dashboard-profile-card {
+  position:relative;
+  overflow:hidden;
+  display:grid;
+  gap:16px;
+  padding:22px 18px 18px;
+  border:1px solid rgba(255,255,255,.7);
+  border-radius:26px;
+  background:linear-gradient(180deg,rgba(255,255,255,.68),rgba(255,255,255,.56));
+  box-shadow:0 16px 34px rgba(85,108,178,.12), inset 0 1px 0 rgba(255,255,255,.85);
+}
+.student-dashboard-profile-card::before {
+  content:"";
+  position:absolute;
+  inset:-20% auto auto -18%;
+  width:180px;
+  height:180px;
+  border-radius:50%;
+  background:radial-gradient(circle, rgba(72,155,255,.2), rgba(72,155,255,0));
+  pointer-events:none;
+}
+.student-dashboard-profile-header {
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+.student-dashboard-profile-name {
+  position:relative;
+  z-index:1;
+  display:flex;
+  align-items:flex-start;
+  gap:8px;
+  flex-wrap:wrap;
+  color:#24344d;
+  font-size:1.06rem;
+  font-weight:800;
+  line-height:1.4;
+}
+.student-dashboard-profile-meta,
+.student-dashboard-profile-deadline {
+  position:relative;
+  z-index:1;
+  color:#53657f;
+  font-size:.8rem;
+  line-height:1.5;
+}
+.student-dashboard-profile-deadline {
+  display:inline-flex;
+  align-items:center;
+  padding:10px 12px;
+  border:1px solid rgba(129,155,220,.22);
+  border-radius:12px;
+  background:rgba(255,255,255,.42);
+  color:#2d5fc1;
+  font-weight:700;
+}
+.student-dashboard-mini-grid {
+  position:relative;
+  z-index:1;
+  display:grid;
+  gap:10px;
+  margin-top:4px;
+}
+.student-dashboard-mini-item {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  padding:11px 12px;
+  border:1px solid rgba(147,170,222,.18);
+  border-radius:14px;
+  background:rgba(255,255,255,.36);
+  color:#4a5d7a;
+  font-size:.72rem;
+}
+.student-dashboard-mini-item strong {
+  color:#20304d;
+  font-size:.82rem;
+}
+.student-dashboard-quick-links {
+  position:relative;
+  z-index:1;
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-top:4px;
+}
+.student-dashboard-quick-link {
+  appearance:none;
+  border:1px solid rgba(123,104,255,.18);
+  border-radius:999px;
+  padding:9px 12px;
+  font-size:.68rem;
+  font-weight:800;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+  cursor:pointer;
+  transition:transform .15s ease, box-shadow .15s ease;
+  background:#fff;
+  color:#4a536b;
+}
+.student-dashboard-quick-link:hover {
+  transform:translateY(-1px);
+  box-shadow:0 8px 18px rgba(103,115,201,.08);
+}
+.student-dashboard-quick-link.primary {
+  background:#eef3ff;
+  color:#3f5ec7;
+  border-color:rgba(89,120,214,.24);
+}
+.student-dashboard-quick-link.secondary {
+  background:#f5f7ff;
+  color:#424f74;
+  border-color:rgba(148,163,184,.25);
+}
+.student-dashboard-quick-link.neutral {
+  background:#fff;
+  color:#49586d;
+  border-color:rgba(148,163,184,.2);
+}
+.student-dashboard-main-column {
+  display:grid;
+  gap:18px;
+}
+.student-dashboard-progress-row {
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:14px;
+}
+.student-dashboard-progress-card {
+  position:relative;
+  display:grid;
+  gap:7px;
+  padding:16px 16px 14px;
+  border:1px solid rgba(148,163,184,.18);
+  border-radius:18px;
+  background:linear-gradient(180deg, rgba(255,255,255,.76), rgba(242,247,255,.72));
+  box-shadow:0 10px 22px rgba(88,105,172,.06);
+}
+.student-dashboard-progress-card.accent {
+  background:linear-gradient(180deg, rgba(235,245,255,.9), rgba(221,233,255,.74));
+}
+.student-dashboard-progress-card.warm {
+  background:linear-gradient(180deg, rgba(255,247,237,.9), rgba(255,230,207,.74));
+}
+.student-dashboard-card-kicker {
+  color:#6c7ea6;
+  font-size:.62rem;
+  font-weight:800;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+}
+.student-dashboard-progress-card strong {
+  color:#1f2d45;
+  font-size:.92rem;
+  line-height:1.5;
+}
+.student-dashboard-progress-value {
+  color:#1f3d8f;
+  font-size:1.7rem;
+  font-weight:800;
+  letter-spacing:-.04em;
+}
+.student-dashboard-progress-card small {
+  color:#5b6d89;
+  font-size:.71rem;
+}
+.student-dashboard-progress-panel {
+  display:grid;
+  gap:12px;
+  padding:18px 18px 16px;
+  border:1px solid rgba(255,255,255,.75);
+  border-radius:22px;
+  background:linear-gradient(180deg, rgba(255,255,255,.7), rgba(241,246,255,.58));
+  box-shadow:0 14px 28px rgba(88,105,172,.06);
+}
+.student-dashboard-panel-heading {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+}
+.student-dashboard-panel-heading h3 {
+  margin:0;
+  color:#24314b;
+  font-size:1rem;
+}
+.student-dashboard-progress-list {
+  display:grid;
+  gap:12px;
+}
+.student-dashboard-progress-item {
+  display:grid;
+  gap:8px;
+}
+.student-dashboard-progress-copy {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  color:#42567a;
+  font-size:.72rem;
+}
+.student-dashboard-progress-item strong {
+  color:#1d3151;
+  font-size:.8rem;
+}
+.student-dashboard-progress-bar {
+  position:relative;
+  height:10px;
+  overflow:hidden;
+  border-radius:999px;
+  background:rgba(205,216,241,.7);
+}
+.student-dashboard-progress-bar i {
+  display:block;
+  height:100%;
+  border-radius:inherit;
+  background:linear-gradient(90deg, #5fa5ff, #7d6cf0 58%, #3ec5c1);
+}
+.student-dashboard-hero-card {
+  padding:18px 18px 14px;
+  border:1px solid rgba(255,255,255,.72);
+  border-radius:24px;
+  background:linear-gradient(180deg,rgba(255,255,255,.66),rgba(244,248,255,.54));
+  box-shadow:0 18px 34px rgba(92,108,180,.08), inset 0 1px 0 rgba(255,255,255,.88);
+}
+.student-dashboard-header-meta {
+  display:flex;
+  align-items:flex-end;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:16px;
+  color:#71809f;
+  font-size:.72rem;
+}
+.student-dashboard-metric-row {
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:14px;
+}
+.student-dashboard-metric-tile {
+  position:relative;
+  overflow:hidden;
+  display:grid;
+  gap:8px;
+  padding:18px 16px 15px;
+  border:1px solid rgba(145,169,214,.18);
+  border-radius:18px;
+  background:linear-gradient(180deg, var(--dash-bg-start) 0%, var(--dash-bg-end) 100%);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.72);
+}
+.student-dashboard-metric-tile .stat-icon {
+  position:absolute;
+  top:12px;
+  right:12px;
+  width:34px;
+  height:34px;
+  border-radius:10px;
+  background:rgba(255,255,255,.7) !important;
+  box-shadow:none;
+}
+.student-dashboard-metric-tile .stat-label {
+  max-width:calc(100% - 44px);
+  margin:0;
+  color:var(--dash-text);
+  opacity:.8;
+  font-size:.62rem;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+.student-dashboard-metric-tile .stat-value {
+  margin:0;
+  color:var(--dash-text);
+  font-size:1.7rem;
+  font-weight:800;
+  letter-spacing:-.04em;
+}
+.student-dashboard-metric-tile .stat-sub {
+  color:var(--dash-text);
+  opacity:.82;
+  font-size:.74rem;
+}
+.student-dashboard-lower-grid {
+  display:grid;
+  grid-template-columns:minmax(0,1.25fr) minmax(220px,.75fr);
+  gap:16px;
+}
+.student-dashboard-summary-panel,
+.student-dashboard-news-panel {
+  min-width:0;
+  padding:17px;
+  border:1px solid rgba(203,213,225,.7);
+  border-radius:20px;
+  background:rgba(255,255,255,.74);
+  box-shadow:0 12px 22px rgba(15,23,42,.04);
+}
+.student-dashboard-news-panel {
+  display:grid;
+  gap:12px;
+  align-content:start;
+}
+.student-dashboard-news-box {
+  padding:14px 14px 0;
+  border-top:1px solid rgba(148,163,184,.18);
+}
+.student-dashboard-news-box strong {
+  display:block;
+  color:#1f2a44;
+  font-size:.9rem;
+  line-height:1.45;
+  margin-bottom:6px;
+}
+.student-dashboard-news-box p {
+  color:#4f5d75;
+  font-size:.8rem;
+  line-height:1.6;
+  margin:0;
+}
+@media (max-width: 820px) {
+  .student-dashboard-shell,
+  .student-dashboard-lower-grid,
+  .student-dashboard-metric-row {
+    grid-template-columns:1fr;
+  }
+  .student-dashboard-header-meta {
+    flex-direction:column;
+    align-items:flex-start;
+  }
+  .student-dashboard-quick-links {
+    gap:10px;
+  }
+}
 .admin-app .admin-dashboard .stats-grid {
   grid-template-columns:repeat(4,minmax(0,1fr));
   gap:15px;
@@ -3502,6 +3991,161 @@ body.dark-mode .app .bottom-nav-item.active {
   background:#edf1f7;
 }
 .admin-app .admin-dashboard .progress-bar { border-radius:99px; }
+.admin-app .admin-dashboard-header {
+  align-items:center;
+  margin-bottom:18px;
+  padding:17px 19px;
+  border:1px solid #e9ebf5;
+  border-radius:15px;
+  background:
+    radial-gradient(circle at 91% 5%,rgba(154,132,238,.12),transparent 13rem),
+    linear-gradient(110deg,#fff,#fbfbff 65%,#f8f7ff);
+  box-shadow:0 5px 18px rgba(32,45,82,.045);
+}
+.admin-app .admin-dashboard-header .page-title {
+  color:#202b46;
+  font-size:1.35rem;
+  font-weight:780;
+  letter-spacing:-.04em;
+}
+.admin-app .admin-dashboard-header .page-sub {
+  margin-top:4px;
+  color:#7c879e;
+  font-size:.76rem;
+}
+.admin-dashboard-eyebrow { color:#7770c8; font-size:.59rem; }
+.admin-dashboard-header-meta {
+  align-items:end;
+  color:#66718a;
+}
+.admin-app .admin-dashboard-header-meta [aria-label="Current date and time"] {
+  color:#66718a !important;
+  font-size:.68rem !important;
+}
+.admin-app .admin-dashboard .dashboard-stat-card {
+  border:1px solid #e9ebf3;
+  border-top:2px solid var(--dash-accent);
+  border-radius:13px;
+  background:#fff;
+  box-shadow:0 5px 16px rgba(32,45,82,.045);
+}
+.admin-app .admin-dashboard .dashboard-stat-card .stat-icon {
+  border:1px solid rgba(232,235,246,.9);
+  background:#f7f8fc !important;
+}
+.admin-app .admin-dashboard .dashboard-stat-card .stat-label {
+  color:#76819a !important;
+  font-size:.61rem;
+  letter-spacing:.08em;
+}
+.admin-app .admin-dashboard .dashboard-stat-card .stat-value {
+  color:#26334f !important;
+  font-size:1.72rem;
+}
+.admin-app .admin-dashboard .dashboard-stat-card .stat-sub {
+  color:#8992a7 !important;
+  font-size:.67rem;
+}
+.admin-app .admin-dashboard .admin-level-count {
+  border:1px solid #eff0f6;
+  background:#fafaff;
+}
+.admin-app .admin-dashboard .admin-level-count span { color:#78829a; }
+.admin-app .admin-dashboard .grid2 { grid-template-columns:minmax(0,1.35fr) minmax(270px,.8fr); }
+.admin-app .admin-dashboard .admin-dashboard-panel {
+  min-width:0;
+  padding:17px;
+}
+.admin-app .admin-dashboard .admin-dashboard-panel h3 {
+  margin:4px 0 0;
+  padding:0;
+  border:0;
+  color:#26334f !important;
+  font-size:.88rem !important;
+  letter-spacing:-.02em;
+}
+.admin-dashboard-panel-heading {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:11px;
+}
+.admin-dashboard-panel-eyebrow {
+  display:block;
+  color:#969db1;
+  font-size:.57rem;
+  font-weight:800;
+  letter-spacing:.11em;
+}
+.admin-dashboard-panel-icon {
+  display:grid;
+  width:31px;
+  height:31px;
+  place-items:center;
+  border-radius:10px;
+  background:#eef1ff;
+  color:#5f70db;
+  font-size:1rem;
+  font-weight:800;
+}
+.admin-dashboard-panel-icon-purple {
+  background:#f3edff;
+  color:#875bd4;
+}
+.admin-dashboard-activity {
+  display:flex;
+  min-width:0;
+  align-items:center;
+  gap:10px;
+  padding:10px 0;
+  border-bottom:1px solid #f0f1f6;
+}
+.admin-dashboard-activity:last-child { border-bottom:0; }
+.admin-dashboard-activity-dot {
+  width:8px;
+  height:8px;
+  flex:0 0 8px;
+  border-radius:50%;
+  background:var(--activity-color,#94a3b8);
+  box-shadow:0 0 0 4px color-mix(in srgb,var(--activity-color,#94a3b8) 12%,transparent);
+}
+.admin-dashboard-activity-text {
+  min-width:0;
+  flex:1;
+  color:#4b5670;
+  font-size:.76rem;
+  line-height:1.45;
+}
+.admin-dashboard-activity-time {
+  flex:0 0 auto;
+  color:#9aa2b4;
+  font-size:.64rem;
+}
+.admin-dashboard-level { margin:15px 0; }
+.admin-dashboard-level-heading {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  margin-bottom:7px;
+  color:#58637d;
+  font-size:.74rem;
+  font-weight:650;
+}
+.admin-dashboard-level-heading strong { color:#34405b; font-size:.74rem; }
+.admin-dashboard-level-heading small { color:#929ab0; font-size:.64rem; font-weight:600; }
+.admin-app .admin-dashboard .admin-dashboard-level .progress { height:6px; }
+.admin-dashboard-level-total {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  margin-top:16px;
+  padding-top:12px;
+  border-top:1px solid #eff0f6;
+  color:#818ba1;
+  font-size:.7rem;
+}
+.admin-dashboard-level-total strong { color:#26334f; font-size:.88rem; }
 body.dark-mode .admin-app { background:#0d1729; }
 body.dark-mode .admin-app .topbar {
   background:#111f35;
@@ -3546,6 +4190,45 @@ body.dark-mode .admin-app .admin-dashboard .card {
   background:#15243b;
 }
 body.dark-mode .admin-app .admin-dashboard .card h3 { color:#e3ecfa !important; }
+body.dark-mode .admin-app .admin-dashboard-header {
+  border-color:#2d3850;
+  background:linear-gradient(110deg,#121b2b,#19223a);
+}
+body.dark-mode .admin-app .admin-dashboard-header .page-title { color:#e7ebf5; }
+body.dark-mode .admin-app .admin-dashboard-header .page-sub,
+body.dark-mode .admin-app .admin-dashboard-header-meta,
+body.dark-mode .admin-app .admin-dashboard-header-meta [aria-label="Current date and time"] { color:#a0abc1 !important; }
+body.dark-mode .admin-dashboard-eyebrow { color:#aaa2fa; }
+body.dark-mode .admin-dashboard-avatar,
+body.dark-mode .admin-dashboard-session {
+  border-color:#354260;
+  background:#1b2942;
+  color:#c7c1ff;
+}
+body.dark-mode .admin-dashboard-session strong { color:#e3e9f7; }
+body.dark-mode .admin-dashboard-session small,
+body.dark-mode .admin-dashboard-session span { color:#a0abc1; }
+body.dark-mode .admin-app .admin-dashboard .dashboard-stat-card {
+  border-color:#2d3850;
+  border-top-color:var(--dash-accent);
+  background:#121b2b;
+}
+body.dark-mode .admin-app .admin-dashboard .dashboard-stat-card .stat-value { color:#e3e9f7 !important; }
+body.dark-mode .admin-app .admin-dashboard .dashboard-stat-card .stat-label,
+body.dark-mode .admin-app .admin-dashboard .dashboard-stat-card .stat-sub { color:#a0abc1 !important; }
+body.dark-mode .admin-app .admin-dashboard .dashboard-stat-card .stat-icon { border-color:#34415d; background:#1b2942 !important; }
+body.dark-mode .admin-app .admin-dashboard .admin-level-count { border-color:#354260; background:#1b2942; }
+body.dark-mode .admin-app .admin-dashboard .admin-level-count span { color:#a0abc1; }
+body.dark-mode .admin-app .admin-dashboard .admin-dashboard-panel h3 { color:#e3e9f7 !important; }
+body.dark-mode .admin-dashboard-panel-eyebrow,
+body.dark-mode .admin-dashboard-activity-time,
+body.dark-mode .admin-dashboard-level-total { color:#a0abc1; }
+body.dark-mode .admin-dashboard-activity { border-bottom-color:#2d3850; }
+body.dark-mode .admin-dashboard-activity-text,
+body.dark-mode .admin-dashboard-level-heading { color:#c0c9d9; }
+body.dark-mode .admin-dashboard-level-heading strong,
+body.dark-mode .admin-dashboard-level-total strong { color:#e3e9f7; }
+body.dark-mode .admin-dashboard-level-total { border-top-color:#2d3850; }
 @media (max-width: 1000px) {
   .admin-app .admin-dashboard .stats-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
 }
@@ -3560,12 +4243,934 @@ body.dark-mode .admin-app .admin-dashboard .card h3 { color:#e3ecfa !important; 
     margin-bottom:16px;
     padding:18px;
   }
+  .admin-dashboard-heading { align-items:flex-start; gap:11px; }
+  .admin-dashboard-avatar { width:44px; height:44px; flex-basis:44px; border-radius:13px; }
+  .admin-app .admin-dashboard-header .page-title { font-size:1.18rem; }
+  .admin-dashboard-session { min-width:0; }
+  .admin-app .admin-dashboard .grid2 { grid-template-columns:1fr; }
+  .admin-dashboard-activity { align-items:flex-start; flex-wrap:wrap; }
+  .admin-dashboard-activity-text { flex-basis:calc(100% - 24px); }
+  .admin-dashboard-activity-time { margin-left:18px; }
+  .student-dashboard-welcome { align-items:flex-start; gap:11px; }
+  .student-dashboard-avatar {
+    width:46px;
+    height:46px;
+    flex-basis:46px;
+    border-radius:13px;
+  }
+  .admin-app .student-dashboard-header .page-title { font-size:1.35rem; }
+  .student-dashboard-deadline { margin-left:57px; }
   .admin-dashboard-header-meta { justify-items:start; text-align:left; }
   .admin-app .admin-dashboard-header-meta [aria-label="Current date and time"] { justify-content:flex-start; }
   .admin-app .admin-dashboard .stats-grid { gap:10px; }
   .admin-app .admin-dashboard .dashboard-stat-card { padding:14px; }
   .admin-app .admin-dashboard .dashboard-stat-card .stat-icon { top:12px; right:12px; }
   .admin-app .admin-dashboard .dashboard-stat-card .stat-value { font-size:1.55rem; }
+}
+.admin-app { background:#eef1fa; }
+.admin-app .sidebar {
+  background:rgba(255,255,255,.68);
+  border-right:1px solid rgba(255,255,255,.82);
+  box-shadow:5px 0 22px rgba(72,81,143,.07);
+  -webkit-backdrop-filter:blur(22px) saturate(145%);
+  backdrop-filter:blur(22px) saturate(145%);
+}
+.admin-app .sidebar-brand { border-bottom-color:rgba(255,255,255,.72); }
+.admin-app .sidebar-brand img { border-color:rgba(255,255,255,.9); }
+.admin-sidebar-brand-copy strong { color:#252b42; }
+.admin-sidebar-brand-copy small { color:#959aae; }
+.admin-app .sidebar-section { color:#a0a4b4; }
+.admin-app .nav-item { color:#686f85; }
+.admin-app .nav-item:hover {
+  background:#f7f7fb;
+  color:#4e55a4;
+}
+.admin-app .nav-item.active {
+  background:#f0efff;
+  color:#5f59ca;
+  box-shadow:inset 0 0 0 1px #e8e6ff;
+}
+.admin-app .nav-item.active::before { background:#766cf0; }
+.admin-app .main {
+  background:
+    radial-gradient(ellipse at 82% 9%,rgba(177,168,255,.2),transparent 32rem),
+    radial-gradient(ellipse at 8% 78%,rgba(133,194,255,.16),transparent 34rem),
+    linear-gradient(135deg,#f3f5fc,#edf0fa 52%,#f2effb);
+}
+.admin-app .topbar {
+  background:rgba(255,255,255,.76);
+  border-bottom-color:rgba(255,255,255,.85);
+  box-shadow:0 6px 24px rgba(65,75,136,.055);
+  -webkit-backdrop-filter:blur(20px) saturate(150%);
+  backdrop-filter:blur(20px) saturate(150%);
+}
+.admin-app .admin-dashboard {
+  position:relative;
+  isolation:isolate;
+  padding:18px;
+  overflow:hidden;
+  border:1px solid rgba(255,255,255,.92);
+  border-radius:22px;
+  background:
+    linear-gradient(135deg,rgba(255,255,255,.78),rgba(247,248,255,.55) 44%,rgba(238,234,255,.58));
+  box-shadow:
+    0 0 0 1px rgba(112,134,242,.38),
+    0 0 0 4px rgba(112,134,242,.08),
+    0 14px 42px rgba(85,89,174,.18),
+    inset 0 1px 0 rgba(255,255,255,.98),
+    inset 0 0 28px rgba(255,255,255,.48);
+  -webkit-backdrop-filter:blur(24px) saturate(150%);
+  backdrop-filter:blur(24px) saturate(150%);
+}
+.admin-app .admin-dashboard-header {
+  align-items:center;
+  margin-bottom:18px;
+  padding:4px 2px 16px;
+  border:0;
+  border-bottom:1px solid rgba(255,255,255,.8);
+  border-radius:0;
+  background:linear-gradient(90deg,rgba(255,255,255,.2),rgba(255,255,255,.46),rgba(255,255,255,.16));
+  box-shadow:0 1px 0 rgba(116,128,196,.08);
+}
+.admin-app .admin-dashboard-header .page-title {
+  color:#252b42;
+  font-size:1.42rem;
+  font-weight:750;
+  letter-spacing:-.035em;
+}
+.admin-app .admin-dashboard-header .page-sub { color:#858ba0; }
+.admin-dashboard-eyebrow { color:#7c75d7; }
+.admin-dashboard-header-meta { color:#757c91; }
+.admin-app .admin-dashboard-header-meta [aria-label="Current date and time"] {
+  color:#757c91 !important;
+}
+.admin-app .admin-dashboard .stats-grid {
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:15px;
+  margin-bottom:16px;
+}
+.admin-app .admin-dashboard .dashboard-stat-card {
+  min-height:130px;
+  padding:18px;
+  border:1px solid rgba(255,255,255,.94);
+  border-radius:14px;
+  background:
+    linear-gradient(145deg,rgba(255,255,255,.82),rgba(255,255,255,.48)),
+    linear-gradient(120deg,rgba(203,213,255,.22),rgba(232,214,255,.2));
+  box-shadow:
+    0 8px 20px rgba(90,97,163,.08),
+    inset 0 1px 0 rgba(255,255,255,.98),
+    inset 0 0 18px rgba(255,255,255,.34);
+  -webkit-backdrop-filter:blur(18px) saturate(145%);
+  backdrop-filter:blur(18px) saturate(145%);
+}
+.admin-app .admin-dashboard .dashboard-stat-card .stat-icon {
+  border:1px solid rgba(255,255,255,.9);
+  background:rgba(255,255,255,.62) !important;
+  box-shadow:0 3px 10px rgba(89,99,160,.06),inset 0 1px 0 #fff;
+}
+.admin-app .admin-dashboard .dashboard-stat-card .stat-label {
+  color:#81879a !important;
+  font-size:.66rem;
+  letter-spacing:.045em;
+}
+.admin-app .admin-dashboard .dashboard-stat-card .stat-value {
+  color:#282e47 !important;
+  font-size:1.8rem;
+}
+.admin-app .admin-dashboard .dashboard-stat-card .stat-sub {
+  color:#979caf !important;
+}
+.admin-app .admin-dashboard .grid2 { gap:15px; }
+.admin-app .admin-dashboard .admin-dashboard-overview {
+  grid-template-columns:minmax(0,1.7fr) minmax(270px,.9fr);
+  margin-bottom:15px;
+}
+.admin-app .admin-dashboard .admin-dashboard-lower {
+  grid-template-columns:minmax(0,1.25fr) minmax(270px,.9fr);
+}
+.admin-app .admin-dashboard .admin-dashboard-panel {
+  padding:18px;
+  border:1px solid rgba(255,255,255,.94);
+  border-radius:14px;
+  background:
+    linear-gradient(145deg,rgba(255,255,255,.79),rgba(255,255,255,.45)),
+    linear-gradient(130deg,rgba(211,218,255,.15),rgba(232,218,255,.18));
+  box-shadow:
+    0 8px 22px rgba(90,97,163,.075),
+    inset 0 1px 0 rgba(255,255,255,.98),
+    inset 0 0 22px rgba(255,255,255,.38);
+  -webkit-backdrop-filter:blur(20px) saturate(145%);
+  backdrop-filter:blur(20px) saturate(145%);
+}
+.admin-app .admin-dashboard .admin-dashboard-panel h3 {
+  color:#2c3249 !important;
+  font-size:.92rem !important;
+}
+.admin-dashboard-panel-heading { margin-bottom:13px; }
+.admin-dashboard-panel-eyebrow {
+  color:#9a9fb0;
+  font-size:.58rem;
+}
+.admin-dashboard-chart-caption {
+  color:#969bad;
+  font-size:.67rem;
+}
+.admin-dashboard-chart-summary {
+  display:flex;
+  align-items:baseline;
+  gap:7px;
+  margin:2px 0 4px;
+}
+.admin-dashboard-chart-summary strong {
+  color:#292f48;
+  font-size:1.32rem;
+}
+.admin-dashboard-chart-summary span {
+  color:#9298aa;
+  font-size:.68rem;
+}
+.admin-dashboard-chart-wrap { min-width:0; }
+.admin-dashboard-chart {
+  display:block;
+  width:100%;
+  height:180px;
+  overflow:visible;
+}
+.admin-dashboard-chart-gridline {
+  stroke:rgba(128,137,185,.2);
+  stroke-dasharray:3 5;
+  stroke-width:1;
+}
+.admin-dashboard-chart-area { fill:url(#admin-dashboard-chart-gradient); }
+.admin-dashboard-chart-line {
+  fill:none;
+  stroke:#7569e8;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+  stroke-width:3;
+}
+.admin-dashboard-chart-point {
+  fill:rgba(255,255,255,.94);
+  stroke:#7569e8;
+  stroke-width:2.5;
+}
+.admin-dashboard-chart-months {
+  display:flex;
+  justify-content:space-between;
+  margin:0 3px;
+  color:#989daf;
+  font-size:.64rem;
+}
+.admin-dashboard-chart-empty,
+.admin-dashboard-school-empty {
+  display:grid;
+  min-height:160px;
+  place-items:center;
+  color:#9298aa;
+  font-size:.76rem;
+  text-align:center;
+}
+.admin-dashboard-school-count {
+  display:grid;
+  min-width:28px;
+  height:28px;
+  padding:0 7px;
+  place-items:center;
+  border-radius:9px;
+  background:#f0efff;
+  color:#655ed0;
+  font-size:.72rem;
+  font-weight:750;
+}
+.admin-dashboard-school-list { display:grid; }
+.admin-dashboard-school {
+  display:flex;
+  min-width:0;
+  align-items:center;
+  gap:10px;
+  padding:11px 0;
+  border-bottom:1px solid rgba(255,255,255,.72);
+}
+.admin-dashboard-school:last-child { border-bottom:0; }
+.admin-dashboard-school-mark {
+  display:grid;
+  width:34px;
+  height:34px;
+  flex:0 0 34px;
+  place-items:center;
+  border-radius:10px;
+  background:#f0efff;
+  color:#6a61d1;
+  font-size:.78rem;
+  font-weight:750;
+}
+.admin-dashboard-school:nth-child(3n + 2) .admin-dashboard-school-mark {
+  background:#eef6ff;
+  color:#4d8fd2;
+}
+.admin-dashboard-school:nth-child(3n) .admin-dashboard-school-mark {
+  background:#fff5e8;
+  color:#c58a39;
+}
+.admin-dashboard-school-copy {
+  display:grid;
+  min-width:0;
+  gap:4px;
+}
+.admin-dashboard-school-copy strong {
+  overflow:hidden;
+  color:#4b526a;
+  font-size:.73rem;
+  font-weight:650;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.admin-dashboard-school-copy small {
+  color:#979caf;
+  font-size:.64rem;
+}
+body.dark-mode .admin-app .sidebar {
+  background:#111f35;
+  border-right-color:#263956;
+  -webkit-backdrop-filter:blur(22px);
+  backdrop-filter:blur(22px);
+}
+body.dark-mode .admin-app .sidebar-brand { border-bottom-color:#263956; }
+body.dark-mode .admin-sidebar-brand-copy strong { color:#e4edff; }
+body.dark-mode .admin-sidebar-brand-copy small,
+body.dark-mode .admin-app .sidebar-section { color:#91a2bc; }
+body.dark-mode .admin-app .nav-item { color:#b8c8df; }
+body.dark-mode .admin-app .nav-item:hover { background:#1b2c47; color:#fff; }
+body.dark-mode .admin-app .nav-item.active {
+  background:#263b60;
+  color:#dce7ff;
+  box-shadow:inset 0 0 0 1px #354d77;
+}
+body.dark-mode .admin-app .main { background:#0d1729; }
+body.dark-mode .admin-app .topbar {
+  background:rgba(17,31,53,.84);
+  border-bottom-color:#263956;
+}
+body.dark-mode .admin-app .admin-dashboard {
+  border-color:rgba(150,165,255,.38);
+  background:linear-gradient(135deg,rgba(24,38,64,.88),rgba(27,35,67,.76) 54%,rgba(43,32,72,.72));
+  box-shadow:
+    0 0 0 1px rgba(119,139,255,.48),
+    0 0 0 4px rgba(112,134,242,.1),
+    0 14px 42px rgba(0,0,0,.26),
+    inset 0 1px 0 rgba(255,255,255,.16);
+}
+body.dark-mode .admin-app .admin-dashboard-header {
+  border-bottom-color:rgba(183,194,255,.19);
+  background:linear-gradient(90deg,rgba(255,255,255,.015),rgba(255,255,255,.055),rgba(255,255,255,.015));
+}
+body.dark-mode .admin-app .admin-dashboard-header .page-title { color:#e7ebf5; }
+body.dark-mode .admin-app .admin-dashboard-header .page-sub,
+body.dark-mode .admin-dashboard-header-meta,
+body.dark-mode .admin-app .admin-dashboard-header-meta [aria-label="Current date and time"] {
+  color:#a0abc1 !important;
+}
+body.dark-mode .admin-app .admin-dashboard .dashboard-stat-card,
+body.dark-mode .admin-app .admin-dashboard .admin-dashboard-panel {
+  border-color:rgba(190,200,255,.19);
+  background:linear-gradient(145deg,rgba(34,49,78,.78),rgba(25,38,65,.66));
+  box-shadow:0 8px 20px rgba(0,0,0,.14),inset 0 1px 0 rgba(255,255,255,.12);
+}
+body.dark-mode .admin-app .admin-dashboard .dashboard-stat-card .stat-value,
+body.dark-mode .admin-dashboard-chart-summary strong,
+body.dark-mode .admin-app .admin-dashboard .admin-dashboard-panel h3 {
+  color:#e3e9f7 !important;
+}
+body.dark-mode .admin-app .admin-dashboard .dashboard-stat-card .stat-label,
+body.dark-mode .admin-app .admin-dashboard .dashboard-stat-card .stat-sub,
+body.dark-mode .admin-dashboard-chart-summary span,
+body.dark-mode .admin-dashboard-chart-caption,
+body.dark-mode .admin-dashboard-chart-months,
+body.dark-mode .admin-dashboard-chart-empty,
+body.dark-mode .admin-dashboard-school-empty {
+  color:#a0abc1 !important;
+}
+body.dark-mode .admin-dashboard-chart-gridline { stroke:#293751; }
+body.dark-mode .admin-dashboard-school { border-bottom-color:#293751; }
+body.dark-mode .admin-dashboard-chart-point { fill:#213353; }
+body.dark-mode .admin-dashboard-school-copy strong { color:#d2dbee; }
+body.dark-mode .admin-dashboard-school-copy small { color:#a0abc1; }
+.student-app {
+  background:
+    radial-gradient(ellipse at 86% 9%,rgba(176,166,255,.21),transparent 33rem),
+    radial-gradient(ellipse at 12% 72%,rgba(127,193,255,.17),transparent 34rem),
+    linear-gradient(135deg,#f3f5fc,#edf0fa 52%,#f2effb);
+}
+.student-app .topbar {
+  background:rgba(255,255,255,.74);
+  border-bottom-color:rgba(255,255,255,.85);
+  box-shadow:0 6px 24px rgba(65,75,136,.055);
+  -webkit-backdrop-filter:blur(20px) saturate(150%);
+  backdrop-filter:blur(20px) saturate(150%);
+}
+.student-app .menu-btn {
+  width:36px;
+  height:36px;
+  border:1px solid rgba(255,255,255,.9);
+  border-radius:12px;
+  background:linear-gradient(145deg,rgba(255,255,255,.9),rgba(239,239,255,.72));
+  box-shadow:0 4px 13px rgba(78,83,151,.1),inset 0 1px 0 #fff;
+  color:#665fd0 !important;
+  -webkit-backdrop-filter:blur(14px);
+  backdrop-filter:blur(14px);
+  transition:background .16s ease,box-shadow .16s ease,transform .16s ease;
+}
+.student-app .menu-btn:hover {
+  background:rgba(255,255,255,.96);
+  box-shadow:0 6px 16px rgba(78,83,151,.16),inset 0 1px 0 #fff;
+}
+.student-app .menu-btn svg { color:#665fd0 !important; }
+.student-app .sidebar-overlay {
+  background:rgba(45,48,83,.2);
+  -webkit-backdrop-filter:blur(5px) saturate(115%);
+  backdrop-filter:blur(5px) saturate(115%);
+}
+.student-app .sidebar {
+  background:linear-gradient(155deg,rgba(255,255,255,.86),rgba(248,248,255,.73) 62%,rgba(241,240,255,.76));
+  border:1px solid rgba(255,255,255,.92);
+  border-left:0;
+  border-radius:0 20px 20px 0;
+  box-shadow:8px 0 34px rgba(59,63,121,.15),inset 0 1px 0 rgba(255,255,255,.98);
+  -webkit-backdrop-filter:blur(22px) saturate(145%);
+  backdrop-filter:blur(22px) saturate(145%);
+}
+.student-app .sidebar-brand {
+  justify-content:flex-start;
+  gap:10px;
+  padding:12px 9px 16px;
+  border-bottom-color:rgba(206,210,239,.46);
+}
+.student-app .sidebar-brand img {
+  width:40px;
+  height:40px;
+  flex:0 0 40px;
+  border:1px solid rgba(255,255,255,.98);
+  border-radius:12px;
+  box-shadow:0 4px 12px rgba(76,84,157,.12);
+}
+.student-app .admin-sidebar-brand-copy strong { color:#303650; }
+.student-app .admin-sidebar-brand-copy small { color:#898fa7; }
+.student-app .sidebar-section {
+  padding:15px 11px 6px;
+  color:#9399ae;
+  font-size:.62rem;
+  letter-spacing:.12em;
+}
+.student-app .nav-item {
+  gap:10px;
+  padding:9px 11px;
+  margin:2px 0;
+  border-radius:10px;
+  color:#606981;
+  font-size:.82rem;
+  transition:background .16s ease,color .16s ease,box-shadow .16s ease;
+}
+.student-app .nav-item .nav-item-icon {
+  width:19px !important;
+  height:19px !important;
+  color:#7e879f !important;
+  filter:grayscale(.82) saturate(.35) !important;
+}
+.student-app .nav-item .nav-item-label,
+.student-app .nav-item > span:last-child {
+  color:inherit !important;
+  font-weight:600 !important;
+}
+.student-app .nav-item:hover {
+  background:rgba(255,255,255,.7);
+  color:#5552b7;
+  transform:none;
+}
+.student-app .nav-item.active {
+  background:linear-gradient(110deg,rgba(222,224,255,.88),rgba(249,249,255,.78));
+  color:#514bb5;
+  box-shadow:inset 0 0 0 1px rgba(126,120,222,.2),0 4px 12px rgba(80,85,179,.075);
+}
+.student-app .nav-item.active::before {
+  left:0;
+  top:7px;
+  bottom:7px;
+  width:3px;
+  background:linear-gradient(180deg,#7195f2,#8a72e9);
+}
+.student-app .nav-item.active .nav-item-icon {
+  color:#625bd0 !important;
+  filter:none !important;
+}
+.student-app .main {
+  background:
+    radial-gradient(ellipse at 82% 9%,rgba(177,168,255,.2),transparent 32rem),
+    radial-gradient(ellipse at 8% 78%,rgba(133,194,255,.16),transparent 34rem),
+    linear-gradient(135deg,#f3f5fc,#edf0fa 52%,#f2effb);
+}
+.student-app .admin-dashboard.student-dashboard {
+  position:relative;
+  isolation:isolate;
+  padding:18px;
+  overflow:hidden;
+  border:1px solid rgba(255,255,255,.92);
+  border-radius:22px;
+  background:linear-gradient(135deg,rgba(255,255,255,.78),rgba(247,248,255,.55) 44%,rgba(238,234,255,.58));
+  box-shadow:
+    0 0 0 1px rgba(112,134,242,.38),
+    0 0 0 4px rgba(112,134,242,.08),
+    0 14px 42px rgba(85,89,174,.18),
+    inset 0 1px 0 rgba(255,255,255,.98),
+    inset 0 0 28px rgba(255,255,255,.48);
+  -webkit-backdrop-filter:blur(24px) saturate(150%);
+  backdrop-filter:blur(24px) saturate(150%);
+}
+.student-app .student-dashboard-header {
+  align-items:center;
+  margin-bottom:16px;
+  padding:4px 2px 16px;
+  border:0;
+  border-bottom:1px solid rgba(255,255,255,.8);
+  border-radius:0;
+  background:linear-gradient(90deg,rgba(255,255,255,.2),rgba(255,255,255,.46),rgba(255,255,255,.16));
+  box-shadow:0 1px 0 rgba(116,128,196,.08);
+}
+.student-app .student-dashboard-header .page-title {
+  color:#252b42;
+  font-size:1.32rem;
+  font-weight:750;
+  letter-spacing:-.035em;
+}
+.student-app .student-dashboard-header .page-sub,
+.student-app .student-dashboard-header-meta,
+.student-app .student-dashboard-header-meta [aria-label="Current date and time"] {
+  color:#7c849c !important;
+}
+.student-app .student-dashboard-heading { display:grid; gap:9px; }
+.student-app .student-dashboard-welcome { gap:13px; }
+.student-app .student-dashboard-avatar {
+  border:2px solid rgba(255,255,255,.92);
+  background:linear-gradient(145deg,#dfe5ff,#f0e2ff);
+  box-shadow:0 5px 16px rgba(94,103,183,.15);
+  color:#6459c9;
+}
+.student-app .admin-dashboard-eyebrow { color:#7770c8; }
+.student-app .student-dashboard-deadline {
+  margin:0 0 0 68px;
+  color:#92723b;
+}
+.student-app .admin-dashboard-period { color:#8289a0; }
+.student-app .admin-dashboard.student-dashboard .stats-grid {
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:14px;
+  margin-bottom:15px;
+}
+.student-app .admin-dashboard.student-dashboard .dashboard-stat-card {
+  min-width:0;
+  min-height:128px;
+  padding:17px;
+  border:1px solid rgba(255,255,255,.94);
+  border-radius:14px;
+  background:
+    linear-gradient(145deg,rgba(255,255,255,.82),rgba(255,255,255,.48)),
+    linear-gradient(120deg,rgba(203,213,255,.22),rgba(232,214,255,.2));
+  box-shadow:0 8px 20px rgba(90,97,163,.08),inset 0 1px 0 rgba(255,255,255,.98),inset 0 0 18px rgba(255,255,255,.34);
+  -webkit-backdrop-filter:blur(18px) saturate(145%);
+  backdrop-filter:blur(18px) saturate(145%);
+}
+.student-app .admin-dashboard.student-dashboard .dashboard-stat-card .stat-icon {
+  border:1px solid rgba(255,255,255,.9);
+  background:rgba(255,255,255,.66) !important;
+  box-shadow:0 3px 10px rgba(89,99,160,.06),inset 0 1px 0 #fff;
+}
+.student-app .admin-dashboard.student-dashboard .dashboard-stat-card .stat-label {
+  color:#81879a !important;
+  font-size:.65rem;
+  letter-spacing:.045em;
+}
+.student-app .admin-dashboard.student-dashboard .dashboard-stat-card .stat-value {
+  color:#282e47 !important;
+  font-size:1.65rem !important;
+}
+.student-app .admin-dashboard.student-dashboard .dashboard-stat-card .stat-sub {
+  color:#9298aa !important;
+}
+.student-app .student-dashboard-overview {
+  grid-template-columns:minmax(0,1.65fr) minmax(260px,.9fr);
+  gap:14px;
+  margin-bottom:14px;
+}
+.student-app .student-dashboard .admin-dashboard-panel,
+.student-app .student-dashboard-announcements {
+  min-width:0;
+  padding:17px;
+  border:1px solid rgba(255,255,255,.94);
+  border-radius:14px;
+  background:linear-gradient(145deg,rgba(255,255,255,.79),rgba(255,255,255,.45)),linear-gradient(130deg,rgba(211,218,255,.15),rgba(232,218,255,.18));
+  box-shadow:0 8px 22px rgba(90,97,163,.075),inset 0 1px 0 rgba(255,255,255,.98),inset 0 0 22px rgba(255,255,255,.38);
+  -webkit-backdrop-filter:blur(20px) saturate(145%);
+  backdrop-filter:blur(20px) saturate(145%);
+}
+.student-app .student-dashboard .admin-dashboard-panel h3,
+.student-app .student-dashboard-announcements h3 {
+  margin:4px 0 0;
+  padding:0;
+  border:0;
+  color:#2c3249 !important;
+  font-size:.9rem !important;
+}
+.student-app .student-dashboard .admin-dashboard-panel-heading { margin-bottom:12px; }
+.student-app .student-dashboard .admin-dashboard-panel-eyebrow { color:#969bad; }
+.student-app .student-dashboard .admin-dashboard-chart-gridline { stroke:rgba(128,137,185,.2); }
+.student-app .student-dashboard .admin-dashboard-chart-line {
+  stroke:#7569e8;
+  stroke-width:3;
+}
+.student-app .student-dashboard .admin-dashboard-chart-point {
+  fill:rgba(255,255,255,.94);
+  stroke:#7569e8;
+}
+.student-dashboard-snapshot-list { display:grid; }
+.student-dashboard-snapshot-row {
+  display:flex;
+  min-width:0;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:11px 0;
+  border-bottom:1px solid rgba(255,255,255,.72);
+  color:#747c93;
+  font-size:.72rem;
+}
+.student-dashboard-snapshot-row strong {
+  color:#39425d;
+  font-size:.72rem;
+  font-weight:700;
+  text-align:right;
+}
+.student-dashboard-actions {
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-top:14px;
+}
+.student-dashboard-actions .btn { padding:8px 11px; font-size:.7rem; }
+.student-app .student-dashboard-announcements { margin-top:0 !important; }
+.student-app .student-dashboard-announcements .alert {
+  border:1px solid rgba(255,255,255,.7);
+  border-radius:10px;
+  background:rgba(255,255,255,.34);
+  color:#4f5871;
+}
+.student-app {
+  background:
+    radial-gradient(circle at 15% 15%, rgba(144, 210, 255, 0.65), transparent 24%),
+    radial-gradient(circle at 88% 5%, rgba(170, 228, 255, 0.8), transparent 26%),
+    linear-gradient(180deg, #bfe8ff 0%, #cfeeff 18%, #edf8ff 100%);
+}
+.student-app .topbar {
+  background: rgba(255,255,255,0.38);
+  border-bottom-color: rgba(93,151,186,0.18);
+  backdrop-filter: blur(10px);
+}
+.student-app .sidebar {
+  background: rgba(255,255,255,0.18);
+  border-right-color: rgba(108,156,193,0.2);
+  backdrop-filter: blur(10px);
+}
+.student-app .nav-item {
+  color:#446583;
+}
+.student-app .nav-item.active {
+  background: linear-gradient(90deg, rgba(59,130,246,.12), rgba(14,165,233,.05));
+  box-shadow: inset 0 0 0 1px rgba(59,130,246,.14);
+}
+.student-app .nav-item.active::before {
+  background: linear-gradient(180deg, #2d9cdb, #67d1ff);
+}
+.student-app .nav-item.active .nav-item-icon,
+.student-app .nav-item.active .nav-item-label {
+  color: #1f5bb2 !important;
+}
+.student-app .main {
+  background: transparent;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 24px 16px 30px;
+}
+.student-app .admin-dashboard.student-dashboard {
+  position: relative;
+  isolation: isolate;
+  max-width: 960px;
+  width: min(100%, 960px);
+  margin: 0 auto;
+  padding: 18px 18px 18px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.82);
+  border-radius: 28px;
+  background: rgba(255,255,255,0.18);
+  box-shadow: 0 18px 38px rgba(62,111,153,.12), inset 0 1px 0 rgba(255,255,255,.75);
+  backdrop-filter: blur(16px);
+}
+.student-app .admin-dashboard.student-dashboard::before {
+  content: "";
+  position: absolute;
+  inset: 12px 14px auto 14px;
+  height: 82px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(255,255,255,.28), rgba(255,255,255,.12));
+  border: 1px solid rgba(255,255,255,.26);
+  z-index: 0;
+}
+.student-app .student-dashboard-header {
+  position: relative;
+  z-index: 1;
+  align-items: center;
+  margin-bottom: 16px;
+  padding: 14px 8px 14px;
+  border: 0;
+  border-bottom: 1px solid rgba(148,186,214,.18);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.student-app .student-dashboard-header .page-title {
+  color: #173f62;
+  font-size: 1.7rem;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+}
+.student-app .student-dashboard-header .page-sub,
+.student-app .student-dashboard-header-meta,
+.student-app .student-dashboard-header-meta [aria-label="Current date and time"] {
+  color: #53758c !important;
+}
+.student-app .student-dashboard-heading { display:grid; gap:9px; }
+.student-app .student-dashboard-welcome { gap:13px; }
+.student-app .student-dashboard-avatar {
+  border: 2px solid rgba(255,255,255,.9);
+  background: linear-gradient(135deg, #4a8af6 0%, #57c5f7 100%);
+  box-shadow: 0 8px 16px rgba(58,113,168,.18);
+  color: #fff;
+}
+.student-app .admin-dashboard-eyebrow { color: #0a76b8; }
+.student-app .student-dashboard-deadline {
+  margin: 0 0 0 68px;
+  color: #1d7ec9;
+}
+.student-app .admin-dashboard-period { color: #557691; }
+.student-app .admin-dashboard.student-dashboard .stats-grid {
+  position: relative;
+  z-index: 1;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 15px;
+}
+.student-app .admin-dashboard.student-dashboard .dashboard-stat-card {
+  min-width: 0;
+  min-height: 126px;
+  padding: 16px 14px 12px;
+  border: 1px solid rgba(148,186,214,.25);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(255,255,255,.72), rgba(235,246,255,.9));
+  box-shadow: 0 10px 20px rgba(69,109,146,.08), inset 0 1px 0 rgba(255,255,255,.72);
+}
+.student-app .admin-dashboard.student-dashboard .dashboard-stat-card .stat-icon {
+  border: 1px solid rgba(148,186,214,.3);
+  background: rgba(255,255,255,.86) !important;
+  box-shadow: 0 3px 10px rgba(69,109,146,.05);
+}
+.student-app .admin-dashboard.student-dashboard .dashboard-stat-card .stat-label {
+  color: #6b8ea8 !important;
+  font-size: .62rem;
+  letter-spacing: .045em;
+}
+.student-app .admin-dashboard.student-dashboard .dashboard-stat-card .stat-value {
+  color: #12395e !important;
+  font-size: 1.5rem !important;
+  line-height: 1.1;
+}
+.student-app .admin-dashboard.student-dashboard .dashboard-stat-card .stat-sub {
+  color: #7190ad !important;
+}
+.student-app .student-dashboard-overview {
+  position: relative;
+  z-index: 1;
+  grid-template-columns: minmax(0,1.7fr) minmax(220px,.9fr);
+  gap: 14px;
+  margin-bottom: 12px;
+}
+.student-app .student-dashboard .admin-dashboard-panel,
+.student-app .student-dashboard-announcements,
+.student-app .student-dashboard-summary-panel,
+.student-app .student-dashboard-news-panel {
+  min-width: 0;
+  padding: 14px 14px 12px;
+  border: 1px solid rgba(146,186,215,.22);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(255,255,255,.7), rgba(241,249,255,.88));
+  box-shadow: 0 8px 18px rgba(78,118,153,.06);
+}
+.student-app .student-dashboard .admin-dashboard-panel h3,
+.student-app .student-dashboard-announcements h3 {
+  margin: 4px 0 0;
+  padding: 0;
+  border: 0;
+  color: #153d61 !important;
+  font-size: .9rem !important;
+}
+.student-app .student-dashboard .admin-dashboard-panel-heading { margin-bottom: 12px; }
+.student-app .student-dashboard .admin-dashboard-panel-eyebrow { color: #4d7eb9; }
+.student-app .student-dashboard .admin-dashboard-chart-gridline { stroke: rgba(115,154,200,.2); }
+.student-app .student-dashboard .admin-dashboard-chart-line {
+  stroke: #55aceb;
+  stroke-width: 3;
+}
+.student-app .student-dashboard .admin-dashboard-chart-point {
+  fill: rgba(255,255,255,.94);
+  stroke: #52aeeb;
+}
+.student-dashboard-snapshot-list { display:grid; }
+.student-dashboard-snapshot-row {
+  display:flex;
+  min-width:0;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:10px 0;
+  border-bottom:1px solid rgba(127,162,192,.14);
+  color:#526e86;
+  font-size:.72rem;
+}
+.student-dashboard-snapshot-row strong {
+  color:#153d61;
+  font-size:.72rem;
+  font-weight:700;
+  text-align:right;
+}
+.student-dashboard-actions {
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-top:14px;
+}
+.student-dashboard-actions .btn { padding:8px 11px; font-size:.7rem; }
+.student-app .student-dashboard-announcements { margin-top:0 !important; }
+.student-app .student-dashboard-announcements .alert {
+  border:1px solid rgba(142,199,232,.18);
+  border-radius:10px;
+  background:rgba(255,255,255,.28);
+  color:#44667c;
+}
+.student-app .student-dashboard-focus-card {
+  background: linear-gradient(180deg, #ffffff 0%, #f3f9ff 100%);
+  border:1px solid rgba(82,174,235,.18);
+  box-shadow: 0 10px 20px rgba(75,113,148,.06);
+}
+.student-app .student-dashboard-focus-card.primary { border-color: rgba(75,142,235,.22); }
+.student-app .student-dashboard-focus-card.success { border-color: rgba(42,179,130,.2); }
+.student-app .student-dashboard-focus-card.warning { border-color: rgba(245,160,87,.18); }
+.student-app .student-dashboard-focus-card strong,
+.student-app .student-dashboard-focus-card small,
+.student-app .student-dashboard-news-box strong,
+.student-app .student-dashboard-news-box p,
+.student-app .student-dashboard-snapshot-row,
+.student-app .student-dashboard-snapshot-row strong,
+.student-app .student-dashboard .admin-dashboard-panel h3,
+.student-app .student-dashboard-announcements h3 {
+  color:#153d61 !important;
+}
+.student-app .student-dashboard-focus-label,
+.student-app .student-dashboard .admin-dashboard-panel-eyebrow,
+.student-app .student-dashboard .admin-dashboard-chart-caption,
+.student-app .student-dashboard-snapshot-row span {
+  color:#5c7d99 !important;
+}
+.student-app .student-dashboard-quick-link.primary {
+  background: linear-gradient(135deg, #44a7f7 0%, #2b7ce8 100%);
+  border-color: rgba(57,124,215,.2);
+  color: #fff;
+  box-shadow: 0 8px 18px rgba(57,124,215,.18);
+}
+.student-app .student-dashboard-quick-link.secondary {
+  background: rgba(255,255,255,.7);
+  border-color: rgba(146,186,215,.2);
+  color: #365d80;
+}
+.student-app .student-dashboard-summary-panel .student-dashboard-snapshot-row,
+.student-app .student-dashboard-news-panel .student-dashboard-news-box {
+  border-color: rgba(146,186,215,.12);
+}
+
+.admin-app,
+.admin-app .shell,
+.admin-app .main {
+  width:100%;
+  min-width:0;
+  max-width:100%;
+}
+.admin-app .main {
+  flex:1 1 0;
+  width:auto;
+  overflow-x:hidden;
+}
+.admin-app .main > *,
+.admin-app .main .fade-in,
+.admin-app .main .grid2,
+.admin-app .main .grid3,
+.admin-app .main .form-grid,
+.admin-app .main .stats-grid,
+.admin-app .main .card,
+.admin-app .main .page-header,
+.admin-app .main .table-wrap {
+  min-width:0;
+  max-width:100%;
+}
+.admin-app .main .grid2 > *,
+.admin-app .main .grid3 > *,
+.admin-app .main .form-grid > *,
+.admin-app .main .stats-grid > * {
+  min-width:0;
+}
+.admin-app .main .table-wrap {
+  overflow-x:auto;
+  overscroll-behavior-x:contain;
+  -webkit-overflow-scrolling:touch;
+}
+.admin-app .main :where(h1,h2,h3,h4,p,span,strong,small,label,a,button) {
+  overflow-wrap:anywhere;
+}
+.admin-app .main :where(img,video,canvas,svg,iframe) {
+  max-width:100%;
+}
+@media (max-width: 1000px) {
+  .student-app .admin-dashboard.student-dashboard .stats-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media (max-width: 767px) {
+  .student-app .admin-dashboard.student-dashboard { padding:12px; border-radius:17px; }
+  .student-app .student-dashboard-header { padding-top:0; }
+  .student-app .admin-dashboard.student-dashboard .stats-grid { grid-template-columns:1fr; }
+  .student-app .student-dashboard-overview { grid-template-columns:1fr; }
+  .student-app .student-dashboard-heading { gap:8px; }
+  .student-app .student-dashboard-deadline { margin-left:57px; }
+  .student-app .sidebar {
+    width:min(292px,86vw);
+    padding:10px 12px calc(88px + env(safe-area-inset-bottom));
+    border-radius:0 22px 22px 0;
+  }
+}
+@media (max-width: 1000px) {
+  .admin-app .admin-dashboard .stats-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media (max-width: 767px) {
+  .admin-app .admin-dashboard { padding:12px; border-radius:17px; }
+  .admin-app .admin-dashboard-header { padding-top:0; }
+  .admin-app .admin-dashboard .stats-grid { grid-template-columns:1fr; }
+  .admin-app .admin-dashboard .admin-dashboard-overview,
+  .admin-app .admin-dashboard .admin-dashboard-lower { grid-template-columns:1fr; }
+  .admin-dashboard-chart { height:160px; }
 }
 `;
 
@@ -3577,9 +5182,9 @@ function DashboardDateTime() {
     return () => window.clearInterval(intervalId);
   }, []);
 
-  let day = "—";
-  let date = "—";
-  let time = "—";
+  let day = "-";
+  let date = "-";
+  let time = "-";
   try {
     const locale = cfg.locale || "en-GH";
     const timeZone = cfg.timezone || "Africa/Accra";
@@ -3633,12 +5238,53 @@ function AdminDashboard({
   recentActivity,
   isLoading,
 }) {
-  const { cfg } = useContext(SettingsContext);
   const students = Array.isArray(studentsData) ? studentsData : [];
   const registeredSchoolsList = Array.isArray(registeredSchools)
     ? registeredSchools
     : [];
   const totalStudents = students.length;
+  const currentDate = new Date();
+  const registrationMonths = Array.from({ length: 6 }, (_, index) => {
+    const date = new Date(
+      currentDate.getFullYear(),
+      currentDate.getMonth() - 5 + index,
+      1,
+    );
+    return {
+      date,
+      label: date.toLocaleDateString(undefined, { month: "short" }),
+      count: 0,
+    };
+  });
+  const registrationMonthIndexes = new Map(
+    registrationMonths.map((month, index) => [
+      `${month.date.getFullYear()}-${month.date.getMonth()}`,
+      index,
+    ]),
+  );
+  students.forEach((student) => {
+    if (!student.created_at) return;
+    const createdAt = new Date(student.created_at);
+    if (Number.isNaN(createdAt.getTime())) return;
+    const monthIndex = registrationMonthIndexes.get(
+      `${createdAt.getFullYear()}-${createdAt.getMonth()}`,
+    );
+    if (monthIndex !== undefined) registrationMonths[monthIndex].count += 1;
+  });
+  const registrationChartPoints = registrationMonths.map((month, index) => ({
+    ...month,
+    x: 32 + (index * 536) / (registrationMonths.length - 1),
+    y:
+      164 -
+      (month.count /
+        Math.max(1, ...registrationMonths.map((item) => item.count))) *
+        116,
+  }));
+  const registrationLinePath = registrationChartPoints
+    .map((point, index) => `${index ? "L" : "M"} ${point.x} ${point.y}`)
+    .join(" ");
+  const registrationAreaPath = `${registrationLinePath} L 568 178 L 32 178 Z`;
+  const hasRegistrationData = registrationMonths.some((month) => month.count > 0);
   const registeredRegionCount = new Set(
     registeredSchoolsList
       .map((school) =>
@@ -3680,16 +5326,17 @@ function AdminDashboard({
   return (
     <div className="fade-in admin-dashboard">
       <div className="page-header admin-dashboard-header">
-        <div>
-          <div className="admin-dashboard-eyebrow">Campus Ghana · Administration</div>
-          <div className="page-title">Welcome back, {userName || "Admin"}</div>
-          <div className="page-sub">Here’s what’s happening across your campus today.</div>
+        <div className="admin-dashboard-heading">
+          <div>
+            <div className="admin-dashboard-eyebrow">OVERVIEW</div>
+            <div className="page-title">Welcome back, {userName || "Admin"}</div>
+            <div className="page-sub">
+              Here's what's happening across your campus today.
+            </div>
+          </div>
         </div>
         <div className="admin-dashboard-header-meta">
           <DashboardDateTime />
-          <div className="admin-dashboard-period">
-            Academic Year {cfg.academicYear} · {cfg.currentTerm}
-          </div>
         </div>
       </div>
       <div className="stats-grid">
@@ -3699,148 +5346,171 @@ function AdminDashboard({
             value: String(totalStudents),
             sub: isLoading
               ? "Loading live student records..."
-              : "Live student records",
+              : "Registered student accounts",
             icon: "students",
-            ic: "#0059ff",
-            bgStart: "#f0f7ff",
-            bgEnd: "#dcecff",
-            text: "#0039a6",
-            border: "rgba(0,89,255,.22)",
-            glow: "rgba(96,165,250,.34)",
-            shadow: "rgba(37,99,235,.13)",
+            ic: "#6d63df",
           },
           {
-            label: "Schools Students Are From",
+            label: "Schools Represented",
             value: String(studentSchoolCount),
-            sub: "Distinct schools represented",
-            icon: "pending",
-            ic: "#ff7a00",
-            bgStart: "#fff8ed",
-            bgEnd: "#ffedd3",
-            text: "#a54800",
-            border: "rgba(255,122,0,.24)",
-            glow: "rgba(251,146,60,.32)",
-            shadow: "rgba(234,124,32,.13)",
-          },
-          {
-            label: "Students by Level",
-            levels: [
-              { label: "JHS", value: studentLevels.jhs },
-              { label: "SHS", value: studentLevels.shs },
-              { label: "Universities", value: studentLevels.universities },
-            ],
-            sub: "Students by education level",
-            icon: "confirmed",
-            ic: "#00b86b",
-            bgStart: "#effcf5",
-            bgEnd: "#d5f5e3",
-            text: "#007a46",
-            border: "rgba(0,184,107,.22)",
-            glow: "rgba(52,211,153,.3)",
-            shadow: "rgba(16,150,87,.13)",
+            sub: "Distinct schools in student records",
+            icon: "schools",
+            ic: "#4b9be8",
           },
           {
             label: "Regions Registered",
             value: String(registeredRegionCount),
-            sub: isLoading ? "Loading registered schools..." : "Distinct registered regions",
-            icon: "schools",
-            ic: "#c026ff",
-            bgStart: "#faf5ff",
-            bgEnd: "#eee5ff",
-            text: "#8610b3",
-            border: "rgba(192,38,255,.22)",
-            glow: "rgba(192,132,252,.32)",
-            shadow: "rgba(147,51,234,.13)",
+            sub: isLoading ? "Loading registered schools..." : "Regions with registered schools",
+            icon: "pending",
+            ic: "#e5a84b",
           },
         ].map((s) => (
           <div
             key={s.label}
             className="stat-card dashboard-stat-card"
             style={{
-              "--dash-bg-start": s.bgStart,
-              "--dash-bg-end": s.bgEnd,
               "--dash-accent": s.ic,
-              "--dash-text": s.text,
-              "--dash-border": s.border,
-              "--dash-glow": s.glow,
-              "--dash-shadow": s.shadow,
             }}
           >
             <div className="stat-icon">
               <Ico name={s.icon} size={20} color={s.ic} />
             </div>
             <div className="stat-label">{s.label}</div>
-            {s.levels ? (
-              <div className="admin-level-counts">
-                {s.levels.map((level) => (
-                  <div className="admin-level-count" key={level.label}>
-                    <strong>{level.value}</strong>
-                    <span>{level.label}</span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="stat-value">{s.value}</div>
-            )}
-            <div className="stat-sub">{isLoading && s.levels ? "Loading student records..." : s.sub}</div>
+            <div className="stat-value">{s.value}</div>
+            <div className="stat-sub">{s.sub}</div>
           </div>
         ))}
       </div>
-      <div className="grid2" style={{ marginBottom: 16 }}>
-        <div className="card card-padded">
-          <h3
-            style={{
-              fontWeight: 700,
-              marginBottom: 16,
-              fontSize: "1rem",
-              color: "#0f172a",
-            }}
-          >
-            Recent Activity
-          </h3>
-          {(recentActivity?.length
-            ? recentActivity
-            : [
-                {
-                  id: "empty",
-                  text: "No recent activity available from current records.",
-                  timeLabel: "",
-                  dot: "#94a3b8",
-                },
-              ]
-          ).map((a, i) => (
-            <div
-              key={i}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                padding: "8px 0",
-                borderBottom: i < 3 ? "1px solid #f1f5f9" : "none",
-              }}
-            >
-              <div
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: "50%",
-                  background: a.dot,
-                  flexShrink: 0,
-                }}
-              />
-              <span style={{ fontSize: ".85rem", flex: 1 }}>{a.text}</span>
-              <span
-                style={{ fontSize: ".75rem", color: "#94a3b8", flexShrink: 0 }}
+      <div className="grid2 admin-dashboard-overview">
+        <section className="card card-padded admin-dashboard-panel admin-dashboard-chart-panel">
+          <div className="admin-dashboard-panel-heading">
+            <div>
+              <span className="admin-dashboard-panel-eyebrow">STUDENT ENROLLMENT</span>
+              <h3>Registration overview</h3>
+            </div>
+            <span className="admin-dashboard-chart-caption">Last 6 months</span>
+          </div>
+          <div className="admin-dashboard-chart-summary">
+            <strong>{totalStudents.toLocaleString()}</strong>
+            <span>student records</span>
+          </div>
+          {hasRegistrationData ? (
+            <div className="admin-dashboard-chart-wrap">
+              <svg
+                className="admin-dashboard-chart"
+                viewBox="0 0 600 210"
+                role="img"
+                aria-label="Monthly student registrations over the last six months"
               >
-                {a.timeLabel}
-              </span>
+                <defs>
+                  <linearGradient id="admin-dashboard-chart-gradient" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="0%" stopColor="#8278ee" stopOpacity=".22" />
+                    <stop offset="100%" stopColor="#8278ee" stopOpacity=".01" />
+                  </linearGradient>
+                </defs>
+                {[48, 106, 164].map((y) => (
+                  <line
+                    key={y}
+                    x1="30"
+                    x2="570"
+                    y1={y}
+                    y2={y}
+                    className="admin-dashboard-chart-gridline"
+                  />
+                ))}
+                <path d={registrationAreaPath} className="admin-dashboard-chart-area" />
+                <path d={registrationLinePath} className="admin-dashboard-chart-line" />
+                {registrationChartPoints.map((point) => (
+                  <circle
+                    key={point.label + point.date.getFullYear()}
+                    cx={point.x}
+                    cy={point.y}
+                    r="4"
+                    className="admin-dashboard-chart-point"
+                  >
+                    <title>
+                      {point.label}: {point.count} registrations
+                    </title>
+                  </circle>
+                ))}
+              </svg>
+              <div className="admin-dashboard-chart-months" aria-hidden="true">
+                {registrationChartPoints.map((point) => (
+                  <span key={point.label + point.date.getFullYear()}>
+                    {point.label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="admin-dashboard-chart-empty">
+              No student registrations with dates in the last six months.
+            </div>
+          )}
+        </section>
+        <section className="card card-padded admin-dashboard-panel admin-dashboard-schools-panel">
+          <div className="admin-dashboard-panel-heading">
+            <div>
+              <span className="admin-dashboard-panel-eyebrow">SCHOOL DIRECTORY</span>
+              <h3>Registered schools</h3>
+            </div>
+            <span className="admin-dashboard-school-count">
+              {registeredSchoolsList.length}
+            </span>
+          </div>
+          {registeredSchoolsList.length ? (
+            <div className="admin-dashboard-school-list">
+              {registeredSchoolsList.slice(0, 5).map((school) => (
+                <div key={school.id} className="admin-dashboard-school">
+                  <span className="admin-dashboard-school-mark" aria-hidden="true">
+                    {String(school.name || "S").trim().charAt(0).toUpperCase()}
+                  </span>
+                  <span className="admin-dashboard-school-copy">
+                    <strong>{school.name}</strong>
+                    <small>{school.region || "Region not specified"}</small>
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="admin-dashboard-school-empty">
+              No registered schools available.
+            </div>
+          )}
+        </section>
+      </div>
+      <div className="grid2 admin-dashboard-overview admin-dashboard-lower">
+        <section className="card card-padded admin-dashboard-panel">
+          <div className="admin-dashboard-panel-heading">
+            <div>
+              <span className="admin-dashboard-panel-eyebrow">CAMPUS UPDATES</span>
+              <h3>Recent activity</h3>
+            </div>
+            <span className="admin-dashboard-panel-icon" aria-hidden="true">R</span>
+          </div>
+          {(recentActivity?.length ? recentActivity.slice(0, 5) : [
+            {
+              id: "empty",
+              text: "No recent activity available from current records.",
+              timeLabel: "",
+              dot: "#94a3b8",
+            },
+          ]).map((a, i) => (
+            <div key={a.id || i} className="admin-dashboard-activity">
+              <span className="admin-dashboard-activity-dot" style={{ "--activity-color": a.dot }} />
+              <span className="admin-dashboard-activity-text">{a.text}</span>
+              <time className="admin-dashboard-activity-time">{a.timeLabel}</time>
             </div>
           ))}
-        </div>
-        <div className="card card-padded">
-          <h3 style={{ fontWeight: 700, marginBottom: 16, fontSize: "1rem" }}>
-            Education Level Breakdown
-          </h3>
+        </section>
+        <section className="card card-padded admin-dashboard-panel">
+          <div className="admin-dashboard-panel-heading">
+            <div>
+              <span className="admin-dashboard-panel-eyebrow">LEARNER OVERVIEW</span>
+              <h3>Education level</h3>
+            </div>
+            <span className="admin-dashboard-panel-icon admin-dashboard-panel-icon-purple" aria-hidden="true">L</span>
+          </div>
           {[
             {
               label: "JHS",
@@ -3857,40 +5527,40 @@ function AdminDashboard({
               count: studentLevels.universities,
               color: "#9333ea",
             },
-          ].map((level) => (
-            <div key={level.label} style={{ marginBottom: 12 }}>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  marginBottom: 4,
-                }}
-              >
-                <span style={{ fontWeight: 600, fontSize: ".85rem" }}>
-                  {level.label}
-                </span>
-                <span
-                  style={{
-                    color: level.color,
-                    fontWeight: 700,
-                    fontSize: ".85rem",
-                  }}
-                >
-                  {level.count}
-                </span>
+          ].map((level) => {
+            const percentage = totalStudents
+              ? Math.round((level.count / totalStudents) * 100)
+              : 0;
+            return (
+            <div key={level.label} className="admin-dashboard-level">
+              <div className="admin-dashboard-level-heading">
+                <span>{level.label}</span>
+                <strong>{level.count}<small>{`   ${percentage}%`}</small></strong>
               </div>
-              <div className="progress">
+              <div
+                className="progress"
+                role="progressbar"
+                aria-label={`${level.label} students`}
+                aria-valuemin={0}
+                aria-valuemax={totalStudents || 1}
+                aria-valuenow={level.count}
+              >
                 <div
                   className="progress-bar"
                   style={{
-                    width: `${totalStudents ? (level.count / totalStudents) * 100 : 0}%`,
+                    width: `${percentage}%`,
                     background: level.color,
                   }}
                 />
               </div>
             </div>
-          ))}
-        </div>
+            );
+          })}
+          <div className="admin-dashboard-level-total">
+            <span>Total student records</span>
+            <strong>{totalStudents.toLocaleString()}</strong>
+          </div>
+        </section>
       </div>
     </div>
   );
@@ -3970,6 +5640,7 @@ const buildStudentDraft = (student = null) => {
 
   return {
     full_name: student?.full_name || student?.name || "",
+    gender: student?.gender || "",
     index:
       generatedIndex ||
       student?.index ||
@@ -4004,6 +5675,7 @@ const normalizeStudentRecord = (student = {}, fallbackIndex = 0) => {
   );
 
   return {
+    ...student,
     id: student.id ?? fallbackIndex + 1,
     full_name: student.full_name || student.name || "Unnamed Student",
     index:
@@ -4026,6 +5698,18 @@ const normalizeStudentRecord = (student = {}, fallbackIndex = 0) => {
     created_at: student.created_at || null,
     updated_at: student.updated_at || null,
   };
+};
+
+const getStudentEducationLevel = (student) => {
+  const explicitLevel = String(
+    student?.education_level || student?.educationLevel || student?.level || "",
+  ).toLowerCase();
+  const className = String(student?.class || student?.class_name || "").toLowerCase();
+  const level = explicitLevel || className;
+  if (/\bjhs\b|junior high/.test(level)) return "JHS";
+  if (/\bshs\b|senior high/.test(level)) return "SHS";
+  if (/university|tertiary|college/.test(level)) return "University";
+  return "Other";
 };
 
 const isBasic8Student = (studentClass) => {
@@ -4121,7 +5805,7 @@ function StudentEditorModal({
             </div>
           </div>
           <button className="modal-close" onClick={onClose}>
-            ✕
+
           </button>
         </div>
         <div className="form-grid">
@@ -4140,6 +5824,18 @@ function StudentEditorModal({
               value={draft.index}
               onChange={(e) => onChange("index", e.target.value)}
             />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Gender</label>
+            <select
+              className="form-control"
+              value={draft.gender || ""}
+              onChange={(e) => onChange("gender", e.target.value)}
+            >
+              <option value="">Not provided</option>
+              <option value="Male">Male</option>
+              <option value="Female">Female</option>
+            </select>
           </div>
           <div className="form-group">
             <label className="form-label">Class</label>
@@ -4281,7 +5977,7 @@ function TeacherEditorModal({
             </div>
           </div>
           <button className="modal-close" onClick={onClose}>
-            ✕
+
           </button>
         </div>
         <div className="alert alert-info" style={{ marginBottom: 14 }}>
@@ -4431,1476 +6127,11 @@ function TeacherEditorModal({
 }
 
 // STUDENTS LIST
-function StudentsPage({
-  onEnroll,
-  onEditStudent = null,
-  studentsData,
-  showEnrollAction = true,
-  heroKicker = "Admissions Registry",
-  heroTitle = "Student records, cleaned up and ready for action",
-  heroSub = "Review the current intake pipeline, search across enrolled learners quickly, and move straight into adding a new student without leaving the admissions workspace.",
-  heroNote = "Live list view across configured classes and region origin.",
-  directoryTitle = "Student directory",
-  directorySub = "Students grouped by registered school and class. Search by name or student ID.",
-  emptyRemoteMessage = "No student rows are currently available from Supabase.",
-  onReloadStudents,
-  registeredSchools = [],
-  canAssignRegisteredSchool = false,
-  isSuperAdmin = false,
-}) {
-  const { cfg } = useContext(SettingsContext);
-  const classOptions = resolveClassOptions(cfg);
-  const [search, setSearch] = useState("");
-  const [editingStudent, setEditingStudent] = useState(null);
-  const [studentDraft, setStudentDraft] = useState(() => buildStudentDraft());
-  const [savingStudent, setSavingStudent] = useState(false);
-  const [movingStudent, setMovingStudent] = useState(null);
-  const [movingSchoolId, setMovingSchoolId] = useState("");
-  const [savingMove, setSavingMove] = useState(false);
-  const [selectedStudentIds, setSelectedStudentIds] = useState([]);
-  const [bulkClass, setBulkClass] = useState("");
-  const [bulkSchoolId, setBulkSchoolId] = useState("");
-  const [bulkStatus, setBulkStatus] = useState("");
-  const [applyingBulk, setApplyingBulk] = useState(false);
-  const [provisioningLogins, setProvisioningLogins] = useState(false);
-  const [selectedFilterSchoolId, setSelectedFilterSchoolId] = useState("");
-  const [selectedFilterClassId, setSelectedFilterClassId] = useState("");
-  const [statusModal, setStatusModal] = useState({
-    open: false,
-    type: "success",
-    title: "",
-    message: "",
-  });
-  const isMobile = useIsMobileLayout();
-  const [deletingId, setDeletingId] = useState(null);
-  const { notify } = useContext(NotificationContext) || {};
-
-  const handleDelete = async (student) => {
-    if (
-      !window.confirm(
-        `Delete student '${student.full_name}' (ID: ${student.index})? This cannot be undone.`,
-      )
-    )
-      return;
-    setDeletingId(student.id);
-    try {
-      if (supabase) {
-        const hasRealId =
-          student.id != null && !String(student.id).startsWith("local-");
-        const hasIndex = !!String(student.index || "").trim();
-
-        let deleteRequest = supabase.from("students").delete();
-        if (hasRealId) {
-          deleteRequest = deleteRequest.eq("id", student.id);
-        } else if (hasIndex) {
-          deleteRequest = deleteRequest.eq("index", student.index);
-        } else {
-          throw new Error(
-            "Student record is missing a database id/index key, so it cannot be deleted reliably.",
-          );
-        }
-
-        const { error } = await deleteRequest;
-        if (error) throw error;
-
-        // Verify persistence: with strict RLS/policies, delete can no-op without throwing.
-        const verifyQuery = hasRealId
-          ? supabase.from("students").select("id").eq("id", student.id).limit(1)
-          : supabase
-              .from("students")
-              .select("id")
-              .eq("index", student.index)
-              .limit(1);
-        const { data: stillThere, error: verifyError } = await verifyQuery;
-        if (verifyError) throw verifyError;
-        if (Array.isArray(stillThere) && stillThere.length > 0) {
-          throw new Error(
-            "Delete request was sent, but the record is still present. Check Supabase Row Level Security/policies for students delete.",
-          );
-        }
-
-        notify && notify("Student deleted successfully.", "success");
-        if (typeof onReloadStudents === "function") {
-          await onReloadStudents();
-        }
-      }
-    } catch (err) {
-      notify &&
-        notify(
-          "Failed to delete student: " + (err?.message || "Unknown error"),
-          "error",
-        );
-    } finally {
-      setDeletingId(null);
-    }
-  };
-  const students = studentsData?.length
-    ? sortStudentsByIndex(studentsData)
-    : [];
-  const filtered = students.filter(
-    (s) =>
-      s.full_name.toLowerCase().includes(search.toLowerCase()) ||
-      String(s.index).includes(search),
-  );
-
-  const schoolNameById = new Map(
-    (registeredSchools || []).map((school) => [String(school.id), school.name]),
-  );
-
-  // Group students by school and then by class
-  const groupedStudents = useMemo(() => {
-    const groups = {};
-    
-    filtered.forEach(student => {
-      const schoolId = student.registered_school_id || 'unassigned';
-      const schoolName = schoolId === 'unassigned' ? 'Not Assigned' : schoolNameById.get(String(schoolId)) || `School #${schoolId}`;
-      const className = student.class || 'No Class';
-      
-      if (!groups[schoolId]) {
-        groups[schoolId] = {
-          name: schoolName,
-          classes: {},
-          totalStudents: 0
-        };
-      }
-      
-      if (!groups[schoolId].classes[className]) {
-        groups[schoolId].classes[className] = [];
-      }
-      
-      groups[schoolId].classes[className].push(student);
-      groups[schoolId].totalStudents++;
-    });
-    
-    return groups;
-  }, [filtered, schoolNameById]);
-
-  // Get available classes for selected school
-  const availableClasses = useMemo(() => {
-    if (!selectedFilterSchoolId) return [];
-    const schoolData = groupedStudents[selectedFilterSchoolId];
-    if (!schoolData) return [];
-    return Object.keys(schoolData.classes).sort();
-  }, [selectedFilterSchoolId, groupedStudents]);
-
-  // Get students for selected school and class
-  const displayedStudents = useMemo(() => {
-    if (!selectedFilterSchoolId) return filtered;
-    if (!selectedFilterClassId) {
-      // Show all students from selected school
-      const schoolData = groupedStudents[selectedFilterSchoolId];
-      if (!schoolData) return [];
-      return Object.values(schoolData.classes).flat();
-    }
-    // Show students from selected school and class
-    const schoolData = groupedStudents[selectedFilterSchoolId];
-    if (!schoolData) return [];
-    return schoolData.classes[selectedFilterClassId] || [];
-  }, [selectedFilterSchoolId, selectedFilterClassId, groupedStudents, filtered]);
-  const parentContactOf = (student) =>
-    student?.parent_contact ||
-    student?.parent_phone ||
-    student?.guardian_phone ||
-    student?.guardian_contact ||
-    "-";
-  const schoolOf = (student) => {
-    const id = student?.registered_school_id;
-    if (id == null || String(id).trim() === "") return "Not assigned";
-    return schoolNameById.get(String(id)) || `School #${id}`;
-  };
-  const initialsFor = (name) =>
-    String(name || "ST")
-      .split(" ")
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((w) => w[0])
-      .join("")
-      .toUpperCase();
-  // Aggregate logic removed
-  const pendingCount = students.filter(
-    (student) => student.status === "pending",
-  ).length;
-  const canEditStudents = typeof onEditStudent === "function";
-  const displayedStudentIds = displayedStudents.map((student) => String(student.id));
-  const selectedInDisplayedCount = displayedStudentIds.filter((id) =>
-    selectedStudentIds.includes(id),
-  ).length;
-  const allDisplayedSelected =
-    displayedStudentIds.length > 0 &&
-    selectedInDisplayedCount === displayedStudentIds.length;
-
-  const toggleStudentSelection = (student) => {
-    const id = String(student.id);
-    setSelectedStudentIds((current) =>
-      current.includes(id) ? current.filter((row) => row !== id) : [...current, id],
-    );
-  };
-
-  const toggleSelectAllDisplayed = () => {
-    if (!displayedStudentIds.length) return;
-    setSelectedStudentIds((current) => {
-      if (
-        displayedStudentIds.every((id) => current.includes(id)) &&
-        displayedStudentIds.length
-      ) {
-        return current.filter((id) => !displayedStudentIds.includes(id));
-      }
-      return [
-        ...current.filter((id) => !displayedStudentIds.includes(id)),
-        ...displayedStudentIds,
-      ];
-    });
-  };
-
-  const applyBulkAssignments = async () => {
-    if (!canEditStudents || typeof onEditStudent !== "function") return;
-    if (!selectedStudentIds.length) {
-      setStatusModal({
-        open: true,
-        type: "failure",
-        title: "Bulk Update Failed",
-        message: "Select at least one student first.",
-      });
-      return;
-    }
-    if (
-      !bulkClass &&
-      bulkStatus === "" &&
-      !(canAssignRegisteredSchool && bulkSchoolId !== "")
-    ) {
-      setStatusModal({
-        open: true,
-        type: "failure",
-        title: "Bulk Update Failed",
-        message: "Choose a class, status, or school assignment to apply.",
-      });
-      return;
-    }
-
-    setApplyingBulk(true);
-    let updatedCount = 0;
-    try {
-      const studentsById = new Map(students.map((student) => [String(student.id), student]));
-      for (const id of selectedStudentIds) {
-        const student = studentsById.get(id);
-        if (!student) continue;
-        const nextDraft = buildStudentDraft(student);
-        if (bulkClass) nextDraft.class = bulkClass;
-        if (isSuperAdmin && bulkStatus !== "") {
-          nextDraft.status = bulkStatus;
-        }
-        if (canAssignRegisteredSchool && bulkSchoolId !== "") {
-          nextDraft.registered_school_id =
-            bulkSchoolId === "__UNASSIGN__" ? "" : bulkSchoolId;
-        }
-        await onEditStudent(student, nextDraft);
-        updatedCount += 1;
-      }
-      if (typeof onReloadStudents === "function") {
-        await onReloadStudents();
-      }
-      setSelectedStudentIds([]);
-      setStatusModal({
-        open: true,
-        type: "success",
-        title: "Bulk Update Complete",
-        message: `Updated ${updatedCount} student${updatedCount === 1 ? "" : "s"}.`,
-      });
-    } catch (error) {
-      setStatusModal({
-        open: true,
-        type: "failure",
-        title: "Bulk Update Failed",
-        message: error?.message || "Could not apply bulk assignment.",
-      });
-    } finally {
-      setApplyingBulk(false);
-    }
-  };
-
-  const provisionSelectedStudentLogins = async (studentIdsToProvision = selectedStudentIds) => {
-    const selectedIds = studentIdsToProvision.filter((id) =>
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id),
-    );
-    if (!selectedIds.length) {
-      setStatusModal({
-        open: true,
-        type: "failure",
-        title: "Login Setup Failed",
-        message: "Select registered student records with valid database IDs.",
-      });
-      return;
-    }
-    if (!supabase) {
-      setStatusModal({
-        open: true,
-        type: "failure",
-        title: "Login Setup Failed",
-        message: "Supabase is not configured.",
-      });
-      return;
-    }
-
-    setProvisioningLogins(true);
-    try {
-      const results = [];
-      for (let start = 0; start < selectedIds.length; start += 100) {
-        const { data, error } = await supabase.functions.invoke(
-          "provision-student-logins",
-          { body: { student_ids: selectedIds.slice(start, start + 100) } },
-        );
-        if (error) throw error;
-        if (!Array.isArray(data?.results)) {
-          throw new Error(data?.error || "The provisioning service returned an invalid response.");
-        }
-        results.push(...data.results);
-      }
-
-      const readyCount = results.filter((result) => result.status === "ready").length;
-      const failedResults = results.filter((result) => result.status !== "ready");
-      setStatusModal({
-        open: true,
-        type: failedResults.length ? "failure" : "success",
-        title: failedResults.length ? "Some Logins Need Attention" : "Student Logins Ready",
-        message: [
-          `${readyCount} student login${readyCount === 1 ? "" : "s"} ready.`,
-          failedResults.length
-            ? `${failedResults.length} failed: ${failedResults
-                .slice(0, 5)
-                .map((result) => result.message || result.student_id)
-                .join("; ")}${failedResults.length > 5 ? "; more failures not shown." : ""}`
-            : "New accounts use the recorded parent/guardian contact as their temporary password. Existing passwords were not changed.",
-        ].join(" "),
-      });
-    } catch (error) {
-      setStatusModal({
-        open: true,
-        type: "failure",
-        title: "Login Setup Failed",
-        message: error?.message || "The student login provisioning service could not be reached.",
-      });
-    } finally {
-      setProvisioningLogins(false);
-    }
-  };
-
-  const openStudentEditor = (student) => {
-    setEditingStudent(student);
-    setStudentDraft(buildStudentDraft(student));
-  };
-
-  const openMoveStudentModal = (student) => {
-    setMovingStudent(student);
-    setMovingSchoolId(String(student?.registered_school_id || ""));
-  };
-
-  const saveMoveStudent = async () => {
-    if (!movingStudent) return;
-    setSavingMove(true);
-    try {
-      const nextDraft = buildStudentDraft(movingStudent);
-      nextDraft.registered_school_id = movingSchoolId === "" ? "" : movingSchoolId;
-      await onEditStudent?.(movingStudent, nextDraft);
-      setMovingStudent(null);
-      setMovingSchoolId("");
-      setStatusModal({
-        open: true,
-        type: "success",
-        title: "Student Moved",
-        message: "Student school assignment updated successfully.",
-      });
-      if (typeof onReloadStudents === "function") {
-        await onReloadStudents();
-      }
-    } catch (error) {
-      setStatusModal({
-        open: true,
-        type: "failure",
-        title: "Move Failed",
-        message: error?.message || "Could not move student.",
-      });
-    } finally {
-      setSavingMove(false);
-    }
-  };
-
-  const saveStudentEdit = async () => {
-    if (
-      !editingStudent ||
-      !studentDraft.full_name.trim() ||
-      !studentDraft.index.trim()
-    ) {
-      setStatusModal({
-        open: true,
-        type: "failure",
-        title: "Student Update Failed",
-        message: "Student name and ID are required.",
-      });
-      return;
-    }
-
-    setSavingStudent(true);
-    try {
-      await onEditStudent?.(editingStudent, studentDraft);
-      setEditingStudent(null);
-      setStatusModal({
-        open: true,
-        type: "success",
-        title: "Student Saved",
-        message: "Student record updated successfully.",
-      });
-    } catch (error) {
-      setStatusModal({
-        open: true,
-        type: "failure",
-        title: "Student Update Failed",
-        message: error?.message || "Could not save the student record.",
-      });
-    } finally {
-      setSavingStudent(false);
-    }
-  };
-  return (
-    <div className="fade-in">
-      <ActionStatusModal
-        state={statusModal}
-        onClose={() =>
-          setStatusModal((current) => ({ ...current, open: false }))
-        }
-      />
-      <div className="students-shell">
-        <div className="students-hero">
-          <div className="students-hero-copy">
-            <div className="students-hero-kicker">{heroKicker}</div>
-            <div className="students-hero-title">{heroTitle}</div>
-            <div className="students-hero-sub">{heroSub}</div>
-          </div>
-          <div className="students-hero-actions">
-            {showEnrollAction && (
-              <button className="btn btn-blue" onClick={onEnroll}>
-                <Ico name="enroll" size={16} color="#fff" /> Enroll Student
-              </button>
-            )}
-            <div className="students-hero-note">{heroNote}</div>
-          </div>
-        </div>
-
-        <div className="students-summary-grid">
-          <div className="students-summary-card">
-            <div className="students-summary-label">Total Students</div>
-            <div className="students-summary-value">{students.length}</div>
-            <div className="students-summary-sub">
-              All records currently available
-            </div>
-          </div>
-          <div className="students-summary-card">
-            <div className="students-summary-label">Schools</div>
-            <div className="students-summary-value">{Object.keys(groupedStudents).length}</div>
-            <div className="students-summary-sub">
-              Registered schools with students
-            </div>
-          </div>
-          <div className="students-summary-card">
-            <div className="students-summary-label">Search Results</div>
-            <div className="students-summary-value">{filtered.length}</div>
-            <div className="students-summary-sub">
-              Matching the current filter
-            </div>
-          </div>
-          <div className="students-summary-card">
-            <div className="students-summary-label">Pending Review</div>
-            <div className="students-summary-value">{pendingCount}</div>
-            <div className="students-summary-sub">
-              Students awaiting confirmation
-            </div>
-          </div>
-        </div>
-
-        {!students.length && (
-          <div className="alert alert-warning">{emptyRemoteMessage}</div>
-        )}
-
-        <div className="students-toolbar">
-          <div className="students-toolbar-copy">
-            <div className="students-toolbar-title">{directoryTitle}</div>
-            <div className="students-toolbar-sub">{directorySub}</div>
-          </div>
-          <div className="students-toolbar-actions">
-            <input
-              className="form-control students-search"
-              placeholder="Search students..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            {showEnrollAction && (
-              <button className="btn btn-blue" onClick={onEnroll}>
-                <Ico name="enroll" size={16} color="#fff" /> Enroll Student
-              </button>
-            )}
-          </div>
-        </div>
-
-        {canEditStudents && (
-          <div
-            className="card card-padded"
-            style={{
-              marginBottom: 12,
-              border: "1px solid #bfdbfe",
-              background: "#eff6ff",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 12,
-              flexWrap: "wrap",
-            }}
-          >
-            <div>
-              <div style={{ fontWeight: 800 }}>Student portal logins</div>
-              <div style={{ color: "#475569", fontSize: ".85rem", marginTop: 4 }}>
-                Select student records below, then set up or retry their Student ID logins.
-              </div>
-            </div>
-            <button
-              className="btn btn-blue"
-              type="button"
-              disabled={provisioningLogins || selectedStudentIds.length === 0}
-              onClick={provisionSelectedStudentLogins}
-            >
-              {provisioningLogins
-                ? "Setting Up Logins..."
-                : `Set Up Logins for ${selectedStudentIds.length} Selected`}
-            </button>
-          </div>
-        )}
-
-        {/* School and Class Selection Filters */}
-        <div
-          className="card card-padded"
-          style={{ marginBottom: 12, border: "1px solid #e2e8f0", background: "#f8fafc" }}
-        >
-          <div style={{ fontWeight: 700, marginBottom: 12 }}>
-            📍 Filter by School & Class
-          </div>
-          <div className="form-grid">
-            <div className="form-group">
-              <label className="form-label">Select School</label>
-              <select
-                className="form-control"
-                value={selectedFilterSchoolId}
-                onChange={(e) => {
-                  setSelectedFilterSchoolId(e.target.value);
-                  setSelectedFilterClassId(""); // Reset class when school changes
-                }}
-              >
-                <option value="">-- View All Schools --</option>
-                {Object.entries(groupedStudents).map(([schoolId, schoolData]) => (
-                  <option key={schoolId} value={schoolId}>
-                    {schoolData.name} ({schoolData.totalStudents} students)
-                  </option>
-                ))}
-              </select>
-              <div style={{ fontSize: "0.8rem", color: "#64748b", marginTop: "4px" }}>
-                Start by selecting a school to filter students
-              </div>
-            </div>
-
-            {selectedFilterSchoolId && (
-              <div className="form-group">
-                <label className="form-label">Select Class</label>
-                <select
-                  className="form-control"
-                  value={selectedFilterClassId}
-                  onChange={(e) => setSelectedFilterClassId(e.target.value)}
-                >
-                  <option value="">-- All Classes in {groupedStudents[selectedFilterSchoolId]?.name} --</option>
-                  {availableClasses.map((className) => {
-                    const studentCount = groupedStudents[selectedFilterSchoolId]?.classes[className]?.length || 0;
-                    return (
-                      <option key={className} value={className}>
-                        {className} ({studentCount} students)
-                      </option>
-                    );
-                  })}
-                </select>
-                <div style={{ fontSize: "0.8rem", color: "#64748b", marginTop: "4px" }}>
-                  {selectedFilterClassId ? `Showing students in ${selectedFilterClassId}` : "Select a class or view all classes"}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {selectedFilterSchoolId && (
-            <div style={{ 
-              padding: "12px", 
-              background: "#dbeafe", 
-              borderRadius: "8px", 
-              marginTop: "12px",
-              fontSize: "0.9rem",
-              color: "#1e40af"
-            }}>
-              🔍 Currently showing <strong>{displayedStudents.length}</strong> student{displayedStudents.length !== 1 ? "s" : ""} 
-              {selectedFilterClassId ? ` from ${selectedFilterClassId}` : " from all classes"}
-            </div>
-          )}
-        </div>
-
-        {canEditStudents && (
-          <div
-            className="card card-padded"
-            style={{ marginBottom: 12, border: "1px solid #dbeafe" }}
-          >
-            <div style={{ fontWeight: 700, marginBottom: 8 }}>
-              Bulk School/Class Assignment
-            </div>
-            <div className="form-grid">
-              <div className="form-group">
-                <label className="form-label">Assign Class</label>
-                <select
-                  className="form-control"
-                  value={bulkClass}
-                  onChange={(e) => setBulkClass(e.target.value)}
-                >
-                  <option value="">No class change</option>
-                  {classOptions.map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              {isSuperAdmin && (
-                <div className="form-group">
-                  <label className="form-label">Bulk Status</label>
-                  <select
-                    className="form-control"
-                    value={bulkStatus}
-                    onChange={(e) => setBulkStatus(e.target.value)}
-                  >
-                    <option value="">No status change</option>
-                    <option value="pending">Pending</option>
-                    <option value="confirmed">Confirmed</option>
-                  </select>
-                </div>
-              )}
-              {canAssignRegisteredSchool && (
-                <div className="form-group">
-                  <label className="form-label">Assign School</label>
-                  <select
-                    className="form-control"
-                    value={bulkSchoolId}
-                    onChange={(e) => setBulkSchoolId(e.target.value)}
-                  >
-                    <option value="">No school change</option>
-                    <option value="__UNASSIGN__">Unassign school</option>
-                    {registeredSchools.map((school) => (
-                      <option key={school.id} value={String(school.id)}>
-                        {school.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </div>
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <button
-                className="btn btn-outline"
-                type="button"
-                onClick={toggleSelectAllDisplayed}
-              >
-                {allDisplayedSelected ? "Clear Visible Selection" : "Select All Visible"}
-              </button>
-              <button
-                className="btn btn-blue"
-                type="button"
-                disabled={applyingBulk}
-                onClick={applyBulkAssignments}
-              >
-                {applyingBulk
-                  ? "Applying..."
-                  : `Apply to ${selectedStudentIds.length} selected`}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {isMobile ? (
-          <div className="mobile-record-list">
-            {selectedFilterSchoolId ? (
-              // Filtered view: show only selected school/class students
-              <div>
-                {displayedStudents.length > 0 ? (
-                  <div key={selectedFilterSchoolId} className="school-group">
-                    <div className="school-header">
-                      <h3 className="school-name">{groupedStudents[selectedFilterSchoolId]?.name}</h3>
-                      <span className="school-count">{displayedStudents.length} students</span>
-                    </div>
-                    {selectedFilterClassId ? (
-                      // Show single class
-                      <div className="class-group">
-                        <div className="class-header">
-                          <h4 className="class-name">Class {selectedFilterClassId}</h4>
-                          <span className="class-count">{displayedStudents.length} students</span>
-                        </div>
-                        {displayedStudents.map((s, i) => (
-                          <div key={s.id} className="mobile-record-card">
-                            <div className="mobile-record-head">
-                              <div className="mobile-record-identity">
-                                <div className="mobile-record-avatar">
-                                  {s.photo_url ? (
-                                    <img src={s.photo_url} alt={s.full_name} />
-                                  ) : (
-                                    initialsFor(s.full_name)
-                                  )}
-                                </div>
-                                <div>
-                                  <div className="mobile-record-title">
-                                    {i + 1}. {s.full_name}
-                                  </div>
-                                  <div className="mobile-record-sub">
-                                    Student ID: {s.index}
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                            <div className="mobile-record-grid">
-                              <div className="mobile-record-item">
-                                <label>Class</label>
-                                <span>{s.class}</span>
-                              </div>
-                              <div className="mobile-record-item">
-                                <label>School</label>
-                                <span>{schoolOf(s)}</span>
-                              </div>
-                              <div className="mobile-record-item">
-                                <label>Parent Contact</label>
-                                <span>{parentContactOf(s)}</span>
-                              </div>
-                            </div>
-                            {canEditStudents && (
-                              <div className="mobile-record-actions">
-                                <button
-                                  className="btn btn-outline"
-                                  onClick={() => toggleStudentSelection(s)}
-                                >
-                                  {selectedStudentIds.includes(String(s.id)) ? "Deselect" : "Select"}
-                                </button>
-                                <button
-                                  className="btn btn-outline btn-sm record-action-btn action-edit"
-                                  onClick={() => openStudentEditor(s)}
-                                >
-                                  Edit
-                                </button>
-                                <button
-                                  className="btn btn-sm record-action-btn"
-                                  disabled={provisioningLogins}
-                                  onClick={() => provisionSelectedStudentLogins([String(s.id)])}
-                                >
-                                  Set Up Login
-                                </button>
-                                {canAssignRegisteredSchool && (
-                                  <button
-                                    className="btn btn-sm record-action-btn"
-                                    onClick={() => openMoveStudentModal(s)}
-                                    style={{ background: "#f3f4f6", borderColor: "#d1d5db", color: "#374151" }}
-                                  >
-                                    Move School
-                                  </button>
-                                )}
-                                <button
-                                  className="btn btn-sm record-action-btn action-delete"
-                                  disabled={deletingId === s.id}
-                                  onClick={() => handleDelete(s)}
-                                >
-                                  {deletingId === s.id ? "Deleting..." : "Delete"}
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="students-empty-state">
-                        No students in this class
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  // Show all classes in the selected school
-                  Object.entries(groupedStudents[selectedFilterSchoolId]?.classes || {}).map(([className, classData]) => (
-                    <div key={className} className="class-group">
-                      <div className="class-header">
-                        <h4 className="class-name">Class {className}</h4>
-                        <span className="class-count">{classData.length} students</span>
-                      </div>
-                      {classData.map((s, i) => (
-                        <div key={s.id} className="mobile-record-card">
-                          <div className="mobile-record-head">
-                            <div className="mobile-record-identity">
-                              <div className="mobile-record-avatar">
-                                {s.photo_url ? (
-                                  <img src={s.photo_url} alt={s.full_name} />
-                                ) : (
-                                  initialsFor(s.full_name)
-                                )}
-                              </div>
-                              <div>
-                                <div className="mobile-record-title">
-                                  {i + 1}. {s.full_name}
-                                </div>
-                                <div className="mobile-record-sub">
-                                  Student ID: {s.index}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                          <div className="mobile-record-grid">
-                            <div className="mobile-record-item">
-                              <label>Class</label>
-                              <span>{s.class}</span>
-                            </div>
-                            <div className="mobile-record-item">
-                              <label>School</label>
-                              <span>{schoolOf(s)}</span>
-                            </div>
-                            <div className="mobile-record-item">
-                              <label>Parent Contact</label>
-                              <span>{parentContactOf(s)}</span>
-                            </div>
-                          </div>
-                          {canEditStudents && (
-                            <div className="mobile-record-actions">
-                              <button
-                                className="btn btn-outline"
-                                onClick={() => toggleStudentSelection(s)}
-                              >
-                                {selectedStudentIds.includes(String(s.id)) ? "Deselect" : "Select"}
-                              </button>
-                              <button
-                                className="btn btn-outline btn-sm record-action-btn action-edit"
-                                onClick={() => openStudentEditor(s)}
-                              >
-                                Edit
-                              </button>
-                              <button
-                                className="btn btn-sm record-action-btn"
-                                disabled={provisioningLogins}
-                                onClick={() => provisionSelectedStudentLogins([String(s.id)])}
-                              >
-                                Set Up Login
-                              </button>
-                              {canAssignRegisteredSchool && (
-                                <button
-                                  className="btn btn-sm record-action-btn"
-                                  onClick={() => openMoveStudentModal(s)}
-                                  style={{ background: "#f3f4f6", borderColor: "#d1d5db", color: "#374151" }}
-                                >
-                                  Move School
-                                </button>
-                              )}
-                              <button
-                                className="btn btn-sm record-action-btn action-delete"
-                                disabled={deletingId === s.id}
-                                onClick={() => handleDelete(s)}
-                              >
-                                {deletingId === s.id ? "Deleting..." : "Delete"}
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  ))
-                )}
-              </div>
-            ) : (
-              // Default view: show all schools grouped
-              Object.entries(groupedStudents).map(([schoolId, schoolData]) => (
-                <div key={schoolId} className="school-group">
-                  <div className="school-header">
-                    <h3 className="school-name">{schoolData.name}</h3>
-                    <span className="school-count">{schoolData.totalStudents} students</span>
-                  </div>
-                  {Object.entries(schoolData.classes).map(([className, classData]) => (
-                    <div key={className} className="class-group">
-                      <div className="class-header">
-                        <h4 className="class-name">Class {className}</h4>
-                        <span className="class-count">{classData.length} students</span>
-                      </div>
-                      {classData.map((s, i) => (
-                        <div key={s.id} className="mobile-record-card">
-                          <div className="mobile-record-head">
-                            <div className="mobile-record-identity">
-                              <div className="mobile-record-avatar">
-                                {s.photo_url ? (
-                                  <img src={s.photo_url} alt={s.full_name} />
-                                ) : (
-                                  initialsFor(s.full_name)
-                                )}
-                              </div>
-                              <div>
-                                <div className="mobile-record-title">
-                                  {i + 1}. {s.full_name}
-                                </div>
-                                <div className="mobile-record-sub">
-                                  Student ID: {s.index}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                          <div className="mobile-record-grid">
-                            <div className="mobile-record-item">
-                              <label>Class</label>
-                              <span>{s.class}</span>
-                            </div>
-                            <div className="mobile-record-item">
-                              <label>School</label>
-                              <span>{schoolOf(s)}</span>
-                            </div>
-                            <div className="mobile-record-item">
-                              <label>Parent Contact</label>
-                              <span>{parentContactOf(s)}</span>
-                            </div>
-                          </div>
-                          {canEditStudents && (
-                            <div className="mobile-record-actions">
-                              <button
-                                className="btn btn-outline"
-                                onClick={() => toggleStudentSelection(s)}
-                              >
-                                {selectedStudentIds.includes(String(s.id)) ? "Deselect" : "Select"}
-                              </button>
-                              <button
-                                className="btn btn-outline btn-sm record-action-btn action-edit"
-                                onClick={() => openStudentEditor(s)}
-                              >
-                                Edit
-                              </button>
-                              <button
-                                className="btn btn-sm record-action-btn"
-                                disabled={provisioningLogins}
-                                onClick={() => provisionSelectedStudentLogins([String(s.id)])}
-                              >
-                                Set Up Login
-                              </button>
-                              {canAssignRegisteredSchool && (
-                                <button
-                                  className="btn btn-sm record-action-btn"
-                                  onClick={() => openMoveStudentModal(s)}
-                                  style={{ background: "#f3f4f6", borderColor: "#d1d5db", color: "#374151" }}
-                                >
-                                  Move School
-                                </button>
-                              )}
-                              <button
-                                className="btn btn-sm record-action-btn action-delete"
-                                disabled={deletingId === s.id}
-                                onClick={() => handleDelete(s)}
-                              >
-                                {deletingId === s.id ? "Deleting..." : "Delete"}
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              ))
-            )}
-            {!filtered.length && (
-              <div className="students-empty-state">
-                No students match the current search. Try a different name or
-                student ID.
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="card students-table-card">
-            <div className="students-table-head">
-              <div>
-                <div className="students-table-title">Admissions ledger</div>
-                <div className="students-table-sub">
-                  {selectedFilterSchoolId 
-                    ? `${selectedFilterClassId ? `${selectedFilterClassId} - ` : ''}${groupedStudents[selectedFilterSchoolId]?.name} (${displayedStudents.length} visible record${displayedStudents.length === 1 ? "" : "s"})`
-                    : `Students grouped by school and class (${filtered.length} visible record${filtered.length === 1 ? "" : "s"})`
-                  }
-                </div>
-              </div>
-              <div className="students-table-status">
-                {pendingCount} pending review
-              </div>
-            </div>
-            <div className="table-wrap">
-              {selectedFilterSchoolId ? (
-                // Filtered view: show only selected school/class
-                <div key={selectedFilterSchoolId} className="school-group">
-                  <div className="school-header">
-                    <h3 className="school-name">{groupedStudents[selectedFilterSchoolId]?.name}</h3>
-                    <span className="school-count">{displayedStudents.length} students</span>
-                  </div>
-                  
-                  {selectedFilterClassId ? (
-                    // Show single class table
-                    <div className="class-group">
-                      <div className="class-header">
-                        <h4 className="class-name">Class: {selectedFilterClassId}</h4>
-                        <span className="class-count">{displayedStudents.length} students</span>
-                      </div>
-                      
-                      <table className="students-table">
-                        <thead>
-                          <tr>
-                            {canEditStudents && (
-                              <th>
-                                <input
-                                  type="checkbox"
-                                  checked={displayedStudents.every(s => selectedStudentIds.includes(String(s.id)))}
-                                  onChange={() => {
-                                    const displayedIds = displayedStudents.map(s => String(s.id));
-                                    const allSelected = displayedIds.every(id => selectedStudentIds.includes(id));
-                                    if (allSelected) {
-                                      setSelectedStudentIds(current => current.filter(id => !displayedIds.includes(id)));
-                                    } else {
-                                      setSelectedStudentIds(current => [
-                                        ...current.filter(id => !displayedIds.includes(id)),
-                                        ...displayedIds
-                                      ]);
-                                    }
-                                  }}
-                                />
-                              </th>
-                            )}
-                            <th>#</th>
-                            <th data-col="photo">
-                              <span className="students-th-label">Photo</span>
-                            </th>
-                            <th data-col="name">
-                              <span className="students-th-label">Name</span>
-                            </th>
-                            <th data-col="student-id">
-                              <span className="students-th-label">Student ID</span>
-                            </th>
-                            <th data-col="parent-contact">
-                              <span className="students-th-label">Parent Contact</span>
-                            </th>
-                            {canEditStudents && (
-                              <th>
-                                <span className="students-th-label">Actions</span>
-                              </th>
-                            )}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {displayedStudents.map((s, i) => (
-                            <tr key={s.id}>
-                              {canEditStudents && (
-                                <td>
-                                  <input
-                                    type="checkbox"
-                                    checked={selectedStudentIds.includes(String(s.id))}
-                                    onChange={() => toggleStudentSelection(s)}
-                                  />
-                                </td>
-                              )}
-                              <td>{i + 1}</td>
-                              <td>
-                                {s.photo_url ? (
-                                  <img
-                                    src={s.photo_url}
-                                    alt={s.full_name}
-                                    className="students-avatar"
-                                  />
-                                ) : (
-                                  <div className="students-avatar-placeholder">
-                                    {initialsFor(s.full_name)}
-                                  </div>
-                                )}
-                              </td>
-                              <td className="students-name-cell">
-                                <strong>{s.full_name}</strong>
-                                <span>Status: {s.status || "pending"}</span>
-                              </td>
-                              <td className="students-id-cell">{s.index}</td>
-                              <td>{parentContactOf(s)}</td>
-                              {canEditStudents && (
-                                <td>
-                                  <div className="record-action-group">
-                                    <button
-                                      className="btn btn-sm record-action-btn action-edit"
-                                      onClick={() => openStudentEditor(s)}
-                                    >
-                                      Edit
-                                    </button>
-                                    <button
-                                      className="btn btn-sm record-action-btn"
-                                      disabled={provisioningLogins}
-                                      onClick={() => provisionSelectedStudentLogins([String(s.id)])}
-                                    >
-                                      Set Up Login
-                                    </button>
-                                    {canAssignRegisteredSchool && (
-                                      <button
-                                        className="btn btn-sm record-action-btn"
-                                        onClick={() => openMoveStudentModal(s)}
-                                        style={{ background: "#f3f4f6", borderColor: "#d1d5db", color: "#374151" }}
-                                      >
-                                        Move School
-                                      </button>
-                                    )}
-                                    <button
-                                      className="btn btn-sm record-action-btn action-delete"
-                                      disabled={deletingId === s.id}
-                                      onClick={() => handleDelete(s)}
-                                    >
-                                      {deletingId === s.id ? "Deleting..." : "Delete"}
-                                    </button>
-                                  </div>
-                                </td>
-                              )}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    // Show all classes in selected school - stacked tables
-                    Object.entries(groupedStudents[selectedFilterSchoolId]?.classes || {}).map(([className, classStudents]) => (
-                      <div key={className} className="class-group">
-                        <div className="class-header">
-                          <h4 className="class-name">Class: {className}</h4>
-                          <span className="class-count">{classStudents.length} students</span>
-                        </div>
-                        
-                        <table className="students-table">
-                          <thead>
-                            <tr>
-                              {canEditStudents && (
-                                <th>
-                                  <input
-                                    type="checkbox"
-                                    checked={classStudents.every(s => selectedStudentIds.includes(String(s.id)))}
-                                    onChange={() => {
-                                      const classStudentIds = classStudents.map(s => String(s.id));
-                                      const allSelected = classStudentIds.every(id => selectedStudentIds.includes(id));
-                                      if (allSelected) {
-                                        setSelectedStudentIds(current => current.filter(id => !classStudentIds.includes(id)));
-                                      } else {
-                                        setSelectedStudentIds(current => [
-                                          ...current.filter(id => !classStudentIds.includes(id)),
-                                          ...classStudentIds
-                                        ]);
-                                      }
-                                    }}
-                                  />
-                                </th>
-                              )}
-                              <th>#</th>
-                              <th data-col="photo">
-                                <span className="students-th-label">Photo</span>
-                              </th>
-                              <th data-col="name">
-                                <span className="students-th-label">Name</span>
-                              </th>
-                              <th data-col="student-id">
-                                <span className="students-th-label">Student ID</span>
-                              </th>
-                              <th data-col="parent-contact">
-                                <span className="students-th-label">Parent Contact</span>
-                              </th>
-                              {canEditStudents && (
-                                <th>
-                                  <span className="students-th-label">Actions</span>
-                                </th>
-                              )}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {classStudents.map((s, i) => (
-                              <tr key={s.id}>
-                                {canEditStudents && (
-                                  <td>
-                                    <input
-                                      type="checkbox"
-                                      checked={selectedStudentIds.includes(String(s.id))}
-                                      onChange={() => toggleStudentSelection(s)}
-                                    />
-                                  </td>
-                                )}
-                                <td>{i + 1}</td>
-                                <td>
-                                  {s.photo_url ? (
-                                    <img
-                                      src={s.photo_url}
-                                      alt={s.full_name}
-                                      className="students-avatar"
-                                    />
-                                  ) : (
-                                    <div className="students-avatar-placeholder">
-                                      {initialsFor(s.full_name)}
-                                    </div>
-                                  )}
-                                </td>
-                                <td className="students-name-cell">
-                                  <strong>{s.full_name}</strong>
-                                  <span>Status: {s.status || "pending"}</span>
-                                </td>
-                                <td className="students-id-cell">{s.index}</td>
-                                <td>{parentContactOf(s)}</td>
-                                {canEditStudents && (
-                                  <td>
-                                    <div className="record-action-group">
-                                      <button
-                                        className="btn btn-sm record-action-btn action-edit"
-                                        onClick={() => openStudentEditor(s)}
-                                      >
-                                        Edit
-                                      </button>
-                                      <button
-                                        className="btn btn-sm record-action-btn"
-                                        disabled={provisioningLogins}
-                                        onClick={() => provisionSelectedStudentLogins([String(s.id)])}
-                                      >
-                                        Set Up Login
-                                      </button>
-                                      {canAssignRegisteredSchool && (
-                                        <button
-                                          className="btn btn-sm record-action-btn"
-                                          onClick={() => openMoveStudentModal(s)}
-                                          style={{ background: "#f3f4f6", borderColor: "#d1d5db", color: "#374151" }}
-                                        >
-                                          Move School
-                                        </button>
-                                      )}
-                                      <button
-                                        className="btn btn-sm record-action-btn action-delete"
-                                        disabled={deletingId === s.id}
-                                        onClick={() => handleDelete(s)}
-                                      >
-                                        {deletingId === s.id ? "Deleting..." : "Delete"}
-                                      </button>
-                                    </div>
-                                  </td>
-                                )}
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    ))
-                  )}
-                </div>
-              ) : (
-                // Default view: show all schools and classes
-                Object.entries(groupedStudents).map(([schoolId, schoolData]) => (
-                  <div key={schoolId} className="school-group">
-                    <div className="school-header">
-                      <h3 className="school-name">{schoolData.name}</h3>
-                      <span className="school-count">
-                        {Object.values(schoolData.classes).reduce((total, classStudents) => total + classStudents.length, 0)} students
-                      </span>
-                    </div>
-                    
-                    {Object.entries(schoolData.classes).map(([className, classStudents]) => (
-                      <div key={className} className="class-group">
-                        <div className="class-header">
-                          <h4 className="class-name">Class: {className}</h4>
-                          <span className="class-count">{classStudents.length} students</span>
-                        </div>
-                        
-                        <table className="students-table">
-                          <thead>
-                            <tr>
-                              {canEditStudents && (
-                                <th>
-                                  <input
-                                    type="checkbox"
-                                    checked={classStudents.every(s => selectedStudentIds.includes(String(s.id)))}
-                                    onChange={() => {
-                                      const classStudentIds = classStudents.map(s => String(s.id));
-                                      const allSelected = classStudentIds.every(id => selectedStudentIds.includes(id));
-                                      if (allSelected) {
-                                        setSelectedStudentIds(current => current.filter(id => !classStudentIds.includes(id)));
-                                      } else {
-                                        setSelectedStudentIds(current => [
-                                          ...current.filter(id => !classStudentIds.includes(id)),
-                                          ...classStudentIds
-                                        ]);
-                                      }
-                                    }}
-                                  />
-                                </th>
-                              )}
-                              <th>#</th>
-                              <th data-col="photo">
-                                <span className="students-th-label">Photo</span>
-                              </th>
-                              <th data-col="name">
-                                <span className="students-th-label">Name</span>
-                              </th>
-                              <th data-col="student-id">
-                                <span className="students-th-label">Student ID</span>
-                              </th>
-                              <th data-col="parent-contact">
-                                <span className="students-th-label">Parent Contact</span>
-                              </th>
-                              {canEditStudents && (
-                                <th>
-                                  <span className="students-th-label">Actions</span>
-                                </th>
-                              )}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {classStudents.map((s, i) => (
-                              <tr key={s.id}>
-                                {canEditStudents && (
-                                  <td>
-                                    <input
-                                      type="checkbox"
-                                      checked={selectedStudentIds.includes(String(s.id))}
-                                      onChange={() => toggleStudentSelection(s)}
-                                    />
-                                  </td>
-                                )}
-                                <td>{i + 1}</td>
-                                <td>
-                                  {s.photo_url ? (
-                                    <img
-                                      src={s.photo_url}
-                                      alt={s.full_name}
-                                      className="students-avatar"
-                                    />
-                                  ) : (
-                                    <div className="students-avatar-placeholder">
-                                      {initialsFor(s.full_name)}
-                                    </div>
-                                  )}
-                                </td>
-                                <td className="students-name-cell">
-                                  <strong>{s.full_name}</strong>
-                                  <span>Status: {s.status || "pending"}</span>
-                                </td>
-                                <td className="students-id-cell">{s.index}</td>
-                                <td>{parentContactOf(s)}</td>
-                                {canEditStudents && (
-                                  <td>
-                                    <div className="record-action-group">
-                                      <button
-                                        className="btn btn-sm record-action-btn action-edit"
-                                        onClick={() => openStudentEditor(s)}
-                                      >
-                                        Edit
-                                      </button>
-                                      <button
-                                        className="btn btn-sm record-action-btn"
-                                        disabled={provisioningLogins}
-                                        onClick={() => provisionSelectedStudentLogins([String(s.id)])}
-                                      >
-                                        Set Up Login
-                                      </button>
-                                      {canAssignRegisteredSchool && (
-                                        <button
-                                          className="btn btn-sm record-action-btn"
-                                          onClick={() => openMoveStudentModal(s)}
-                                          style={{ background: "#f3f4f6", borderColor: "#d1d5db", color: "#374151" }}
-                                        >
-                                          Move School
-                                        </button>
-                                      )}
-                                      <button
-                                        className="btn btn-sm record-action-btn action-delete"
-                                        disabled={deletingId === s.id}
-                                        onClick={() => handleDelete(s)}
-                                      >
-                                        {deletingId === s.id ? "Deleting..." : "Delete"}
-                                      </button>
-                                    </div>
-                                  </td>
-                                )}
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    ))}
-                  </div>
-                ))
-              )}
-              
-              {!filtered.length && (
-                <div className="students-empty-state" style={{ margin: 16 }}>
-                  No students match the current search. Try a different name or
-                  student ID.
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-      <StudentEditorModal
-        open={!!editingStudent}
-        title="Edit Student"
-        draft={studentDraft}
-        saving={savingStudent}
-        onChange={(key, value) =>
-          setStudentDraft((current) => ({ ...current, [key]: value }))
-        }
-        onClose={() => !savingStudent && setEditingStudent(null)}
-        onSave={saveStudentEdit}
-        registeredSchools={registeredSchools}
-        canAssignRegisteredSchool={canAssignRegisteredSchool}
-      />
-      {canAssignRegisteredSchool && movingStudent && (
-        <div className="modal-backdrop" onClick={() => !savingMove && setMovingStudent(null)}>
-          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
-            <div className="modal-head">
-              <div>
-                <div className="modal-title">Move Student to School</div>
-                <div className="modal-sub">
-                  Reassign {movingStudent?.full_name} to a registered school
-                </div>
-              </div>
-              <button className="modal-close" onClick={() => !savingMove && setMovingStudent(null)}>
-                ✕
-              </button>
-            </div>
-            <div className="form-grid">
-              <div className="form-group full">
-                <label className="form-label">Registered School</label>
-                <select
-                  className="form-control"
-                  value={movingSchoolId}
-                  onChange={(e) => setMovingSchoolId(e.target.value)}
-                  disabled={savingMove}
-                >
-                  <option value="">-- Unassign from all schools --</option>
-                  {registeredSchools.map((school) => (
-                    <option key={school.id} value={String(school.id)}>
-                      {school.name}
-                      {school.region ? ` (${school.region})` : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div className="modal-actions">
-              <button
-                className="btn btn-outline"
-                onClick={() => setMovingStudent(null)}
-                disabled={savingMove}
-              >
-                Cancel
-              </button>
-              <button className="btn btn-blue" onClick={saveMoveStudent} disabled={savingMove}>
-                {savingMove ? "Moving..." : "Move Student"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+const StudentsPage = lazy(() =>
+  import("./src/components/StudentsManagementPage.jsx").then((module) => ({
+    default: module.StudentsPage,
+  })),
+);
 
 // ENROLL
 function EnrollPage({ onBack, registeredSchoolId = null, onEnrolled = null, registeredSchools = [], isSuperAdmin = false }) {
@@ -6530,7 +6761,7 @@ function EnrollPage({ onBack, registeredSchoolId = null, onEnrolled = null, regi
   );
 }
 
-// â”€â”€â”€ SCORES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//   SCORES
 function ScoresPage({ studentsData, tableInfo }) {
   const hasScoresError = hasRealTableError(tableInfo);
   const isMobile = useIsMobileLayout();
@@ -6711,7 +6942,7 @@ function ScoresPage({ studentsData, tableInfo }) {
   );
 }
 
-// â”€â”€â”€ ANALYTICS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//   ANALYTICS
 function AnalyticsPage({
   studentsData,
   schoolsData,
@@ -6876,7 +7107,7 @@ function AnalyticsPage({
   );
 }
 
-// â”€â”€â”€ ATTENDANCE (Admin) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//   ATTENDANCE (Admin)
 function AttendancePage({
   studentsData,
   tableInfo,
@@ -7130,7 +7361,7 @@ function AttendancePage({
   );
 }
 
-// â”€â”€â”€ FEES (Admin) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//   FEES (Admin)
 function FeesAdmin({
   studentsData,
   feesData,
@@ -7434,7 +7665,7 @@ function FeesAdmin({
   );
 }
 
-// â”€â”€â”€ SCHOOLS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//   SCHOOLS
 function SchoolsPage({ schoolsData }) {
   const isMobile = useIsMobileLayout();
   const schools = sortSchoolsByCategory(
@@ -7734,7 +7965,7 @@ function RegisteredSchoolsPage({
                       </div>
                       <div className="registered-school-sub">
                         {school.location ? `${school.location}, ` : ""}
-                        {school.region} • {school.type || "Mixed"}
+                        {school.region}   {school.type || "Mixed"}
                       </div>
                     </div>
                     <div
@@ -8056,361 +8287,7 @@ function RegisteredSchoolsPage({
   );
 }
 
-function SchoolRegistrationPage({ onBack, onRegisterSchool, setupError = "" }) {
-  const [form, setForm] = useState({
-    name: "",
-    location: "",
-    region: "Ashanti",
-    category: "",
-    type: "",
-    active: true,
-  });
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const [savedSchool, setSavedSchool] = useState(null);
-  const [showReviewModal, setShowReviewModal] = useState(false);
-  const set = (key, value) =>
-    setForm((current) => ({ ...current, [key]: value }));
-
-  const openReviewModal = () => {
-    if (setupError) {
-      setError(setupError);
-      return;
-    }
-    if (!form.name.trim()) {
-      setError("School name is required.");
-      return;
-    }
-    if (!form.location.trim()) {
-      setError("Location is required.");
-      return;
-    }
-
-    setError("");
-    setShowReviewModal(true);
-  };
-
-  const registerSchool = async () => {
-    setSaving(true);
-    setError("");
-
-    try {
-      const school = await onRegisterSchool({
-        name: form.name.trim(),
-        location: form.location.trim(),
-        region: form.region,
-        category: form.category,
-        type: form.type,
-        active: form.active,
-      });
-      setShowReviewModal(false);
-      setSavedSchool(school);
-    } catch (err) {
-      setError(
-        String(err?.message || "Unable to register the school right now."),
-      );
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (savedSchool) {
-    return (
-      <div className="fade-in">
-        <div className="school-reg-success">
-          <div className="alert alert-success" style={{ marginBottom: 0 }}>
-            School registered successfully!
-          </div>
-          <div className="enroll-success-title">
-            {savedSchool.name} has been added
-          </div>
-          <div className="enroll-success-sub">
-            The school has been added to the platform registry and is ready for
-            admin setup and school management workflows.
-          </div>
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            <button className="btn btn-outline" onClick={onBack}>
-              Back To Schools
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="fade-in">
-      <div className="school-reg-shell">
-        <div className="school-reg-hero">
-          <div className="school-reg-hero-copy">
-            <div className="school-reg-kicker">School Directory</div>
-            <div className="school-reg-title">Register a new school</div>
-            <div className="school-reg-sub">
-              Register a school on the platform so its admins can be created and
-              the school can manage its operations in its own workspace.
-            </div>
-          </div>
-          <div className="school-reg-chip">
-            <Ico name="schools" size={14} color="#99f6e4" /> Platform onboarding
-          </div>
-        </div>
-
-        <div className="school-reg-summary-grid">
-          <div className="school-reg-summary-card">
-            <div className="school-reg-summary-label">Onboarding Goal</div>
-            <div className="school-reg-summary-value">Profile</div>
-            <div className="school-reg-summary-sub">
-              Capture the school identity and its operating region clearly
-              before access is provisioned.
-            </div>
-          </div>
-          <div className="school-reg-summary-card">
-            <div className="school-reg-summary-label">Access Setup</div>
-            <div className="school-reg-summary-value">Admin Ready</div>
-            <div className="school-reg-summary-sub">
-              The registered school can immediately receive school-admin
-              accounts after registration.
-            </div>
-          </div>
-          <div className="school-reg-summary-card">
-            <div className="school-reg-summary-label">Visibility</div>
-            <div className="school-reg-summary-value">Controlled</div>
-            <div className="school-reg-summary-sub">
-              Use the active toggle to decide whether the school is currently
-              allowed into live platform operations.
-            </div>
-          </div>
-        </div>
-
-        <div className="school-reg-grid">
-          <aside className="school-reg-side">
-            <div className="school-reg-stat">
-              <div className="school-reg-stat-label">Grade</div>
-              <div className="school-reg-stat-value">
-                {form.category || "-"}
-              </div>
-            </div>
-            <div className="school-reg-stat">
-              <div className="school-reg-stat-label">School Type</div>
-              <div className="school-reg-stat-value">{form.type || "-"}</div>
-            </div>
-            <div className="school-reg-note">
-              Add the official school name, location, grade, and school type
-              carefully. These details feed directly into the registered-school
-              directory and admin setup flow.
-            </div>
-          </aside>
-
-          <div className="card school-reg-form-card">
-            <div className="school-reg-head">
-              <div>
-                <div className="school-reg-head-title">
-                  School registration form
-                </div>
-                <div className="school-reg-head-sub">
-                  Capture the core school details needed to onboard the school
-                  and assign platform access.
-                </div>
-              </div>
-              <div className="enroll-form-status">Draft</div>
-            </div>
-
-            <div className="school-reg-section">
-              <div className="school-reg-section-title">Identity</div>
-              <div className="school-reg-section-sub">
-                The core public-facing information for the school profile.
-              </div>
-              <div className="form-grid">
-                <div className="form-group">
-                  <label className="form-label">School Name</label>
-                  <input
-                    className="form-control"
-                    placeholder="Campus Ghana"
-                    value={form.name}
-                    onChange={(e) => set("name", e.target.value)}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Location</label>
-                  <input
-                    className="form-control"
-                    placeholder="Obuasi"
-                    value={form.location}
-                    onChange={(e) => set("location", e.target.value)}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Region</label>
-                  <select
-                    className="form-control"
-                    value={form.region}
-                    onChange={(e) => set("region", e.target.value)}
-                  >
-                    {GHANA_REGIONS.map((region) => (
-                      <option key={region}>{region}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">School Type</label>
-                  <select
-                    className="form-control"
-                    value={form.type}
-                    onChange={(e) => set("type", e.target.value)}
-                  >
-                    <option value="">Select school type</option>
-                    <option>Mixed</option>
-                    <option>Boys</option>
-                    <option>Girls</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            <div className="school-reg-section">
-              <div className="school-reg-section-title">
-                School classification
-              </div>
-              <div className="school-reg-section-sub">
-                These values define how the school is labeled and organized
-                inside the registered-school directory.
-              </div>
-              <div className="form-grid">
-                <div className="form-group">
-                  <label className="form-label">Grade</label>
-                  <select
-                    className="form-control"
-                    value={form.category}
-                    onChange={(e) => set("category", e.target.value)}
-                  >
-                    <option value="">Select grade</option>
-                    <option>A</option>
-                    <option>B</option>
-                    <option>C</option>
-                  </select>
-                </div>
-              </div>
-              <div className="school-reg-switch" style={{ marginTop: 14 }}>
-                <div className="school-reg-switch-copy">
-                  <div className="school-reg-switch-title">
-                    Accept admissions
-                  </div>
-                  <div className="school-reg-switch-sub">
-                    Inactive schools remain in the registry but can be held back
-                    from active platform use.
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={form.active}
-                  onChange={(e) => set("active", e.target.checked)}
-                />
-              </div>
-            </div>
-
-            {(setupError || error) && (
-              <div className="alert alert-warning" style={{ margin: "0 22px" }}>
-                {setupError || error}
-              </div>
-            )}
-
-            <div className="school-reg-actions">
-              <div className="school-reg-actions-note">
-                Required fields are validated before save. Registered schools
-                are kept in their own registry for super-admin management.
-              </div>
-              <div className="school-reg-actions-row">
-                <button className="btn btn-outline" onClick={onBack}>
-                  Cancel
-                </button>
-                <button
-                  className="btn btn-blue"
-                  onClick={openReviewModal}
-                  disabled={saving || !!setupError}
-                >
-                  {saving ? "Saving..." : "Review Summary"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {showReviewModal && (
-          <div
-            className="modal-backdrop"
-            onClick={() => !saving && setShowReviewModal(false)}
-          >
-            <div
-              className="modal-card"
-              style={{ maxWidth: 560 }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="modal-head">
-                <div>
-                  <div className="modal-title">Review school registration</div>
-                  <div className="modal-sub">
-                    Confirm the school details before creating the platform
-                    registration.
-                  </div>
-                </div>
-                <button
-                  className="modal-close"
-                  onClick={() => !saving && setShowReviewModal(false)}
-                >
-                  <Ico name="close" size={18} color="#1e3a8a" />
-                </button>
-              </div>
-
-              <div className="metric-list">
-                <div className="metric-row">
-                  <span>School Name</span>
-                  <strong>{form.name || "-"}</strong>
-                </div>
-                <div className="metric-row">
-                  <span>Location</span>
-                  <strong>{form.location || "-"}</strong>
-                </div>
-                <div className="metric-row">
-                  <span>Region</span>
-                  <strong>{form.region || "-"}</strong>
-                </div>
-                <div className="metric-row">
-                  <span>School Type</span>
-                  <strong>{form.type || "Not selected"}</strong>
-                </div>
-                <div className="metric-row">
-                  <span>Grade</span>
-                  <strong>{form.category || "Not selected"}</strong>
-                </div>
-                <div className="metric-row">
-                  <span>Status</span>
-                  <strong>{form.active ? "Active" : "Inactive"}</strong>
-                </div>
-              </div>
-
-              <div className="modal-actions">
-                <button
-                  className="btn btn-outline"
-                  onClick={() => setShowReviewModal(false)}
-                  disabled={saving}
-                >
-                  Edit
-                </button>
-                <button
-                  className="btn btn-blue"
-                  onClick={registerSchool}
-                  disabled={saving}
-                >
-                  {saving ? "Saving..." : "Save School Registration"}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
+const SchoolRegistrationPage = lazy(() => import("./src/components/SchoolRegistrationPage.jsx"));
 
 function SchoolAdminDashboardPage({
   user,
@@ -8543,31 +8420,31 @@ function SchoolAdminDashboardPage({
               <div className="school-profile-row">
                 <span className="school-profile-label">Name</span>
                 <span className="school-profile-value">
-                  {school?.name || user?.managed_school_name || "—"}
+                  {school?.name || user?.managed_school_name || " "}
                 </span>
               </div>
               <div className="school-profile-row">
                 <span className="school-profile-label">Region</span>
                 <span className="school-profile-value">
-                  {school?.region || "—"}
+                  {school?.region || " "}
                 </span>
               </div>
               <div className="school-profile-row">
                 <span className="school-profile-label">Location</span>
                 <span className="school-profile-value">
-                  {school?.location || "—"}
+                  {school?.location || " "}
                 </span>
               </div>
               <div className="school-profile-row">
                 <span className="school-profile-label">Grade</span>
                 <span className="school-profile-value">
-                  {school?.category || "—"}
+                  {school?.category || " "}
                 </span>
               </div>
               <div className="school-profile-row">
                 <span className="school-profile-label">Type</span>
                 <span className="school-profile-value">
-                  {school?.type || "—"}
+                  {school?.type || " "}
                 </span>
               </div>
               <div className="school-profile-row">
@@ -8806,31 +8683,31 @@ function ManagedSchoolPage({
                 <div className="school-profile-row">
                   <span className="school-profile-label">School Name</span>
                   <span className="school-profile-value">
-                    {school?.name || user?.managed_school_name || "—"}
+                    {school?.name || user?.managed_school_name || " "}
                   </span>
                 </div>
                 <div className="school-profile-row">
                   <span className="school-profile-label">Region</span>
                   <span className="school-profile-value">
-                    {school?.region || "—"}
+                    {school?.region || " "}
                   </span>
                 </div>
                 <div className="school-profile-row">
                   <span className="school-profile-label">Location</span>
                   <span className="school-profile-value">
-                    {school?.location || "—"}
+                    {school?.location || " "}
                   </span>
                 </div>
                 <div className="school-profile-row">
                   <span className="school-profile-label">Grade</span>
                   <span className="school-profile-value">
-                    {school?.category || "—"}
+                    {school?.category || " "}
                   </span>
                 </div>
                 <div className="school-profile-row">
                   <span className="school-profile-label">Type</span>
                   <span className="school-profile-value">
-                    {school?.type || "—"}
+                    {school?.type || " "}
                   </span>
                 </div>
                 <div className="school-profile-row">
@@ -8986,7 +8863,7 @@ function ManagedSchoolPage({
   );
 }
 
-// â”€â”€â”€ PENDING SELECTIONS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//   PENDING SELECTIONS
 function PendingSelections({
   rows,
   loading,
@@ -9178,7 +9055,7 @@ function PendingSelections({
   );
 }
 
-// â”€â”€â”€ CONFIRMED PLACEMENTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//   CONFIRMED PLACEMENTS
 function ConfirmedPlacements({ rows, loading }) {
   const isMobile = useIsMobileLayout();
   const confirmedRows = rows || [];
@@ -9304,7 +9181,7 @@ function ConfirmedPlacements({ rows, loading }) {
   );
 }
 
-// â”€â”€â”€ RESULTS SUMMARY â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//   RESULTS SUMMARY
 function ResultsPage({ studentsData, tableInfo }) {
   const isMobile = useIsMobileLayout();
   const rankedStudents = [...(studentsData || [])]
@@ -9711,7 +9588,7 @@ function ResultsPage({ studentsData, tableInfo }) {
   );
 }
 
-// â”€â”€â”€ LIVE TESTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//   LIVE TESTS
 function LiveTestsPage({ currentUser }) {
   const [tests, setTests] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -10526,7 +10403,7 @@ function TestEditorModal({ test, onClose, onUpdate }) {
   );
 }
 
-// â”€â”€â”€ FINANCE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//   FINANCE
 function FinancePage({ financeSummary, tableInfo }) {
   const hasFinanceError = hasRealTableError(tableInfo);
   const summary = financeSummary || FINANCE_DATA;
@@ -10634,7 +10511,7 @@ function FinancePage({ financeSummary, tableInfo }) {
   );
 }
 
-// â”€â”€â”€ TEACHERS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//   TEACHERS
 function TeachersPage({
   teachersData,
   tableInfo,
@@ -10766,7 +10643,7 @@ function TeachersPage({
                 <div>
                   <div className="mobile-record-title">{teacher.name}</div>
                   <div className="mobile-record-sub">
-                    {teacher.subject} •{" "}
+                    {teacher.subject}  {" "}
                     {getRoleMeta(globalCfg, teacher.role || "teacher").label}
                   </div>
                 </div>
@@ -10894,7 +10771,7 @@ function TeachersPage({
                         marginTop: 4,
                       }}
                     >
-                      {t.gender || "-"} • DOB: {t.date_of_birth || "-"} • Hired:{" "}
+                      {t.gender || "-"}   DOB: {t.date_of_birth || "-"}   Hired:{" "}
                       {t.hire_date || "-"}
                     </div>
                   </td>
@@ -10945,7 +10822,7 @@ function TeachersPage({
   );
 }
 
-// â”€â”€â”€ EVENTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//   EVENTS
 function EventsPage({ eventsData, tableInfo, registeredSchoolId = null }) {
   const hasEventsError = hasRealTableError(tableInfo);
   const [form, setForm] = useState({
@@ -11184,7 +11061,7 @@ function EventsPage({ eventsData, tableInfo, registeredSchoolId = null }) {
   );
 }
 
-// â”€â”€â”€ SETTINGS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//   SETTINGS
 function SettingsPage() {
   const { cfg: globalCfg, updateCfg, session } = useContext(SettingsContext);
   const [cfg, setCfg] = useState(globalCfg);
@@ -11568,7 +11445,7 @@ function SettingsPage() {
       <div className="page-header">
         <div className="page-title">Settings</div>
         <div className="page-sub">
-          Configure system-wide options — changes apply instantly across the app
+          Configure system-wide options   changes apply instantly across the app
         </div>
       </div>
       <ActionStatusModal
@@ -12047,7 +11924,7 @@ function SettingsPage() {
             gap: 8,
           }}
         >
-          ⚠️ Maintenance mode is <strong>ON</strong>. Students will see a
+            Maintenance mode is <strong>ON</strong>. Students will see a
           maintenance banner. Disable when done.
         </div>
       </div>
@@ -12401,7 +12278,7 @@ function PermissionsMatrixPage({ currentUser }) {
           isProfilesTableMissingError(profilesError) ||
           isMissingTableError(profilesError)
         ) {
-          profilesTableAvailable = false;
+          markProfilesTableUnavailable();
         } else {
           throw profilesError;
         }
@@ -12786,7 +12663,7 @@ function PermissionsMatrixPage({ currentUser }) {
             isProfilesTableMissingError(error) ||
             isMissingTableError(error)
           ) {
-            profilesTableAvailable = false;
+            markProfilesTableUnavailable();
           } else {
             throw error;
           }
@@ -14099,87 +13976,160 @@ function AcademicCalendarPage() {
 }
 
 function HelpdeskPage() {
-  const [tickets, setTickets] = useState([
-    {
-      id: 1,
-      subject: "Unable to update profile",
-      status: "open",
-      priority: "high",
-    },
-  ]);
-  const [form, setForm] = useState({ subject: "", priority: "medium" });
+  const [tickets, setTickets] = useState([]);
+  const [responseDrafts, setResponseDrafts] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [savingTicketKey, setSavingTicketKey] = useState("");
   const isMobile = useIsMobileLayout();
-  const add = () => {
-    if (!form.subject) return;
-    setTickets((t) => [
+  const { notify } = useContext(NotificationContext) || {};
+  const loadTickets = useCallback(async () => {
+    if (!supabase) {
+      setError("Supabase is not configured; saved support tickets are unavailable.");
+      setTickets([]);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    const { data, error: loadError } = await supabase
+      .from("student_portal_records")
+      .select("student_id, record_key, payload, created_at, updated_at")
+      .eq("record_type", "support_ticket")
+      .order("created_at", { ascending: false });
+    if (loadError) {
+      setTickets([]);
+      setError(`Could not load student support tickets: ${loadError.message}`);
+      setLoading(false);
+      return;
+    }
+
+    const studentIds = [...new Set((data || []).map((row) => row.student_id))];
+    let studentsById = new Map();
+    if (studentIds.length) {
+      const { data: students, error: studentsError } = await supabase
+        .from("students")
+        .select("id, full_name, index_number, index, class, region, district")
+        .in("id", studentIds);
+      if (studentsError) {
+        setError(`Tickets loaded, but student details could not be loaded: ${studentsError.message}`);
+      } else {
+        studentsById = new Map((students || []).map((student) => [student.id, student]));
+      }
+    }
+    setTickets((data || []).map((row) => {
+      const student = studentsById.get(row.student_id);
+      return {
+        ...(row.payload || {}),
+        payload: row.payload || {},
+        id: `${row.student_id}:${row.record_key}`,
+        student_id: row.student_id,
+        record_key: row.record_key,
+        created_at: row.created_at,
+        status: row.payload?.status || "open",
+        student,
+      };
+    }));
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    loadTickets();
+  }, [loadTickets]);
+
+  const updateTicket = async (ticket, { response = "", status = ticket.status } = {}) => {
+    const trimmedResponse = response.trim();
+    if (!supabase || (status === ticket.status && !trimmedResponse)) return;
+    setSavingTicketKey(ticket.id);
+    setError("");
+    const { error: updateError } = await supabase.rpc(
+      "respond_to_student_support_ticket",
       {
-        id: Date.now(),
-        subject: form.subject,
-        priority: form.priority,
-        status: "open",
+        p_student_id: ticket.student_id,
+        p_record_key: ticket.record_key,
+        p_response: trimmedResponse || null,
+        p_status: status,
       },
-      ...t,
-    ]);
-    setForm({ subject: "", priority: "medium" });
+    );
+    if (updateError) {
+      setError(`Could not send the ticket update: ${updateError.message}`);
+    } else {
+      setTickets((current) =>
+        current.map((item) => item.id === ticket.id
+          ? {
+              ...item,
+              status,
+              admin_response: trimmedResponse || item.admin_response,
+              responded_at: trimmedResponse ? new Date().toISOString() : item.responded_at,
+              payload: {
+                ...item.payload,
+                status,
+                ...(trimmedResponse
+                  ? { admin_response: trimmedResponse, responded_at: new Date().toISOString() }
+                  : {}),
+              },
+            }
+          : item),
+      );
+      setResponseDrafts((current) => ({ ...current, [ticket.id]: "" }));
+      notify?.(
+        trimmedResponse ? "Response sent to the student." : "Ticket status updated and the student was notified.",
+        "success",
+      );
+    }
+    setSavingTicketKey("");
   };
+
   return (
     <div className="fade-in">
       <div className="page-header">
-        <div className="page-title">Helpdesk</div>
+        <div className="page-title">Student Support Tickets</div>
         <div className="page-sub">
-          Feature 12: Internal ticketing and support workflow.
+          Review and manage support requests submitted from student accounts.
         </div>
       </div>
-      <div className="card card-padded" style={{ marginBottom: 12 }}>
-        <div className="form-grid">
-          <div className="form-group">
-            <label className="form-label">Issue Subject</label>
-            <input
-              className="form-control"
-              value={form.subject}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, subject: e.target.value }))
-              }
-            />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Priority</label>
-            <select
-              className="form-control"
-              value={form.priority}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, priority: e.target.value }))
-              }
-            >
-              <option>low</option>
-              <option>medium</option>
-              <option>high</option>
-            </select>
-          </div>
-        </div>
-        <button
-          className="btn btn-blue"
-          style={{ marginTop: 10 }}
-          onClick={add}
-        >
-          Create Ticket
+      {error && <div className="alert alert-warning" role="alert">{error}</div>}
+      <div className="card card-padded" style={{ marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+        <span>{tickets.length} saved ticket{tickets.length === 1 ? "" : "s"}</span>
+        <button className="btn btn-outline" type="button" onClick={loadTickets} disabled={loading}>
+          {loading ? "Refreshing..." : "Refresh"}
         </button>
       </div>
       {isMobile ? (
         <div className="mobile-record-list">
+          {loading && <div className="mobile-record-card">Loading support tickets...</div>}
           {tickets.map((t) => (
             <div key={t.id} className="mobile-record-card">
               <div className="mobile-record-head">
                 <div>
-                  <div className="mobile-record-title">{t.subject}</div>
+                  <div className="mobile-record-title">{t.subject || "No subject"}</div>
                   <div className="mobile-record-sub">
-                    Priority: {t.priority}
+                    {t.student?.full_name || `Student record ${t.student_id}`}
+                    {t.student?.index_number || t.student?.index ? `   ${t.student.index_number || t.student.index}` : ""}
                   </div>
                 </div>
-                <span className="badge badge-warning">{t.status}</span>
               </div>
+              <div className="mobile-record-item">
+                <label>Submitted</label>
+                <span>{t.submitted_at ? new Date(t.submitted_at).toLocaleString() : new Date(t.created_at).toLocaleString()}</span>
+              </div>
+              <div className="mobile-record-item"><label>Message</label><span>{t.message || "-"}</span></div>
+              {t.admin_response && <div className="mobile-record-item"><label>Last response</label><span>{t.admin_response}</span></div>}
+              <label className="form-label" htmlFor={`ticket-response-${t.id}`}>Response to student</label>
+              <textarea id={`ticket-response-${t.id}`} className="form-control" rows={3} maxLength={5000} value={responseDrafts[t.id] || ""} onChange={(event) => setResponseDrafts((current) => ({ ...current, [t.id]: event.target.value }))} placeholder="Write a response for the student" />
+              <label className="form-label" htmlFor={`ticket-status-${t.id}`}>Status</label>
+              <select id={`ticket-status-${t.id}`} className="form-control" value={t.status} disabled={savingTicketKey === t.id} onChange={(event) => updateTicket(t, { status: event.target.value })}>
+                <option value="open">Open</option>
+                <option value="in_progress">In progress</option>
+                <option value="resolved">Resolved</option>
+              </select>
+              <button className="btn btn-blue" type="button" disabled={savingTicketKey === t.id || !(responseDrafts[t.id] || "").trim()} onClick={() => updateTicket(t, { response: responseDrafts[t.id] || "" })}>
+                {savingTicketKey === t.id ? "Sending..." : "Send response"}
+              </button>
             </div>
           ))}
+          {!loading && !tickets.length && <div className="mobile-record-card">No student support tickets have been submitted.</div>}
         </div>
       ) : (
         <div className="card table-wrap">
@@ -14187,18 +14137,43 @@ function HelpdeskPage() {
             <thead>
               <tr>
                 <th>Subject</th>
-                <th>Priority</th>
+                <th>Student</th>
+                <th>Message / Response</th>
+                <th>Submitted</th>
                 <th>Status</th>
               </tr>
             </thead>
             <tbody>
+              {loading && <tr><td colSpan="5">Loading support tickets...</td></tr>}
               {tickets.map((t) => (
                 <tr key={t.id}>
-                  <td>{t.subject}</td>
-                  <td>{t.priority}</td>
-                  <td>{t.status}</td>
+                  <td><strong>{t.subject || "No subject"}</strong></td>
+                  <td>
+                    {t.student?.full_name || "Student details unavailable"}
+                    <div className="students-table-sub">
+                      ID: {t.student?.index_number || t.student?.index || t.student_id}
+                      {t.student?.class ? `   ${t.student.class}` : ""}
+                    </div>
+                  </td>
+                  <td style={{ maxWidth: 360 }}>
+                    <div style={{ whiteSpace: "pre-wrap" }}>{t.message || " "}</div>
+                    {t.admin_response && <div style={{ whiteSpace: "pre-wrap", marginTop: 8, paddingTop: 8, borderTop: "1px solid #e2e8f0" }}><strong>Last response:</strong> {t.admin_response}</div>}
+                    <textarea className="form-control" rows={2} maxLength={5000} aria-label={`Response to ${t.subject || "support ticket"}`} value={responseDrafts[t.id] || ""} onChange={(event) => setResponseDrafts((current) => ({ ...current, [t.id]: event.target.value }))} placeholder="Write a response for the student" style={{ marginTop: 8 }} />
+                    <button className="btn btn-blue btn-sm" type="button" disabled={savingTicketKey === t.id || !(responseDrafts[t.id] || "").trim()} onClick={() => updateTicket(t, { response: responseDrafts[t.id] || "" })} style={{ marginTop: 6 }}>
+                      {savingTicketKey === t.id ? "Sending..." : "Send response"}
+                    </button>
+                  </td>
+                  <td>{t.submitted_at ? new Date(t.submitted_at).toLocaleString() : new Date(t.created_at).toLocaleString()}</td>
+                  <td>
+                    <select className="form-control" aria-label={`Status for ${t.subject || "support ticket"}`} value={t.status} disabled={savingTicketKey === t.id} onChange={(event) => updateTicket(t, { status: event.target.value })}>
+                      <option value="open">Open</option>
+                      <option value="in_progress">In progress</option>
+                      <option value="resolved">Resolved</option>
+                    </select>
+                  </td>
                 </tr>
               ))}
+              {!loading && !tickets.length && <tr><td colSpan="5" style={{ textAlign: "center", padding: 18 }}>No student support tickets have been submitted.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -14384,7 +14359,7 @@ function MobilePwaPage() {
   );
 }
 
-// â”€â”€â”€ CHAT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//   CHAT
 function ChatPage({ chatUsers, onChatUsersChange }) {
   const [selectedUserId, setSelectedUserId] = useState(1);
   const [msgs, setMsgs] = useState([
@@ -14863,7 +14838,7 @@ function ChatPage({ chatUsers, onChatUsersChange }) {
   );
 }
 
-// â”€â”€â”€ GRADING â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//   GRADING
 function GradingPage() {
   return (
     <div className="fade-in">
@@ -14941,7 +14916,30 @@ function GradingPage() {
   );
 }
 
-// â”€â”€â”€ STUDENT DASHBOARD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//   STUDENT DASHBOARD
+function StudentVerifiedBadge() {
+  return (
+    <svg
+      className="student-verified-badge"
+      viewBox="0 0 20 20"
+      role="img"
+      aria-label="Verified student"
+      focusable="false"
+    >
+      <title>Verified student</title>
+      <circle cx="10" cy="10" r="9" fill="#1877f2" />
+      <path
+        d="m5.8 10.1 2.7 2.6 5.8-5.7"
+        fill="none"
+        stroke="#fff"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function StudentDashboard({
   user,
   studentData,
@@ -14949,6 +14947,7 @@ function StudentDashboard({
   feesData,
   selectionInfo,
   scoreValues,
+  courseProgressSummary,
   onOpenLearningLibrary,
   onOpenCourses,
 }) {
@@ -14960,7 +14959,7 @@ function StudentDashboard({
     region: "-",
   };
   const studentVerified = String(student?.status || "").toLowerCase() === "confirmed";
-  const avatarInitials = (user?.name || student?.full_name || "K")
+  const avatarInitials = (student?.display_name || user?.name || student?.full_name || "K")
     .split(" ")
     .slice(0, 2)
     .map((w) => w[0])
@@ -14972,11 +14971,13 @@ function StudentDashboard({
     maximumFractionDigits: 0,
   });
   const baseScores = Array.isArray(scoreValues) ? scoreValues : [];
-  const avg = Math.round(
-    Object.values(baseScores).reduce((a, b) => a + b, 0) /
-      Math.max(Object.values(baseScores).length, 1),
-  );
-  const g = getGrade(avg);
+  const avg = baseScores.length
+    ? Math.round(
+        baseScores.reduce((total, score) => total + score, 0) /
+          baseScores.length,
+      )
+    : null;
+  const g = getGrade(avg ?? 0);
   const dashboardGrade = Number(g.grade);
   const dashboardGradeColors =
     dashboardGrade <= 2
@@ -14996,10 +14997,62 @@ function StudentDashboard({
       sum + Math.max((Number(f.amount) || 0) - (Number(f.paid) || 0), 0),
     0,
   );
+  const attendanceMonths = Array.from({ length: 6 }, (_, index) => {
+    const date = new Date(new Date().getFullYear(), new Date().getMonth() - 5 + index, 1);
+    return {
+      date,
+      label: date.toLocaleDateString(cfg.locale || "en-GH", { month: "short" }),
+      total: 0,
+      present: 0,
+    };
+  });
+  const attendanceMonthIndexes = new Map(
+    attendanceMonths.map((month, index) => [
+      `${month.date.getFullYear()}-${month.date.getMonth()}`,
+      index,
+    ]),
+  );
+  attendanceRows.forEach((row) => {
+    if (!row.date) return;
+    const date = new Date(row.date);
+    if (Number.isNaN(date.getTime())) return;
+    const monthIndex = attendanceMonthIndexes.get(
+      `${date.getFullYear()}-${date.getMonth()}`,
+    );
+    if (monthIndex === undefined) return;
+    attendanceMonths[monthIndex].total += 1;
+    if (String(row.status).toLowerCase() === "present") {
+      attendanceMonths[monthIndex].present += 1;
+    }
+  });
+  const attendanceChartPoints = attendanceMonths.map((month, index) => {
+    const rate = month.total
+      ? Math.round((month.present / month.total) * 100)
+      : null;
+    return {
+      ...month,
+      rate,
+      x: 32 + (index * 536) / (attendanceMonths.length - 1),
+      y: 166 - ((rate ?? 0) / 100) * 112,
+    };
+  });
+  const recordedAttendancePoints = attendanceChartPoints.filter(
+    (point) => point.rate !== null,
+  );
+  const attendanceLinePath = recordedAttendancePoints
+    .map((point, index) => `${index ? "L" : "M"} ${point.x} ${point.y}`)
+    .join(" ");
+  const attendanceAreaPath = recordedAttendancePoints.length
+    ? `${attendanceLinePath} L ${recordedAttendancePoints[recordedAttendancePoints.length - 1].x} 178 L ${recordedAttendancePoints[0].x} 178 Z`
+    : "";
+  const hasAttendanceTrend = attendanceMonths.some((month) => month.total > 0);
+  const navVisibility = getStudentNavVisibility(cfg);
   const feesEnabled =
+    navVisibility.fees &&
     cfg.studentFeesPortalEnabled !== false &&
     cfg.studentFeesSummaryVisible !== false;
-  const selectionEnabled = cfg.studentSelectSchoolsEnabled !== false;
+  const selectionEnabled =
+    navVisibility.selection && cfg.studentSelectSchoolsEnabled !== false;
   const selectionCount = Number(selectionInfo?.count || 0);
   const selectionStatus = String(
     selectionInfo?.status || "not-submitted",
@@ -15010,519 +15063,316 @@ function StudentDashboard({
       : selectionStatus === "submitted" || selectionStatus === "pending"
         ? "Submitted"
         : "Not Submitted";
-  const resultsEnabled = getStudentNavVisibility(cfg).results;
+  const resultsEnabled = navVisibility.results;
+  const attendanceEnabled = navVisibility.attendance;
+  const showCourses = navVisibility.courses;
+  const showStudyContent = navVisibility["study-content"];
+  const showAnnouncements = navVisibility.announcements;
+  const courseSummary = courseProgressSummary || {
+    enrolledCount: 0,
+    completedCount: 0,
+    averageCompletion: 0,
+    progressItems: [],
+  };
+  const courseAverage = Math.min(100, Math.max(0, Number(courseSummary.averageCompletion) || 0));
+  const progressItems = Array.isArray(courseSummary.progressItems) && courseSummary.progressItems.length
+    ? courseSummary.progressItems.slice(0, 3)
+    : [
+        { title: "No enrolled courses", percent: 0 },
+        { title: "Start a course", percent: 0 },
+        { title: "Track progress here", percent: 0 },
+      ];
+  const dailyProgressValue = Math.min(
+    100,
+    Math.max(0, Math.round(((avg ?? courseAverage) * 0.6) + (courseAverage * 0.4))),
+  );
+  const courseCompletionValue = Math.min(
+    100,
+    Math.max(0, courseAverage || (avg ?? 0)),
+  );
+  const studyStreakText = courseSummary.enrolledCount
+    ? `${Math.max(3, Math.min(14, Math.round(courseCompletionValue / 10) + 2))} days`
+    : "0 days";
+  const dashboardMetrics = [
+    ...(resultsEnabled
+      ? [{
+          label: "Current Average",
+          value: avg === null ? "N/A" : `${avg}%`,
+          sub: baseScores.length ? g.grade : "No score records",
+          ic: dashboardGradeColors.icon,
+          bgStart: dashboardGradeColors.start,
+          bgEnd: dashboardGradeColors.end,
+          text: dashboardGradeColors.text,
+          icon: "results",
+        }]
+      : []),
+    ...(attendanceEnabled
+      ? [{
+          label: "Attendance Rate",
+          value: `${Math.round((present / Math.max(attendanceRows.length, 1)) * 100)}%`,
+          sub: `${present}/${attendanceRows.length} days`,
+          ic: "#00b86b",
+          bgStart: "#ecfff5",
+          bgEnd: "#92f0c2",
+          text: "#007a46",
+          icon: "attendance",
+        }]
+      : []),
+    ...(feesEnabled
+      ? [{
+          label: "Fees Status",
+          value: outstanding > 0 ? "Outstanding" : "Cleared",
+          sub: `${money.format(outstanding)} outstanding`,
+          ic: outstanding > 0 ? "#ff7a00" : "#00b86b",
+          bgStart: outstanding > 0 ? "#fff4e8" : "#ecfff5",
+          bgEnd: outstanding > 0 ? "#ffc47a" : "#92f0c2",
+          text: outstanding > 0 ? "#a54800" : "#007a46",
+          icon: "fees",
+        }]
+      : []),
+  ];
+  const focusCards = [
+    {
+      label: "Today's focus",
+      value: showStudyContent ? "Continue your study plan" : "Review your coursework",
+      meta: showStudyContent ? "Complete one lesson and one recap task" : "Keep pace with your learning goals",
+      tone: "primary",
+    },
+    {
+      label: "Study streak",
+      value: "7-day momentum",
+      meta: "A strong routine keeps your progress moving.",
+      tone: "success",
+    },
+    {
+      label: "Next action",
+      value: selectionEnabled ? `Selection ${selectionLabel}` : "Open the course library",
+      meta: selectionEnabled
+        ? `${selectionCount} ${selectionCount === 1 ? "saved entry" : "saved entries"}`
+        : "Browse the latest lessons and resources",
+      tone: "warning",
+    },
+  ];
+  const quickLinks = [
+    showStudyContent ? { label: "Study library", action: onOpenLearningLibrary, tone: "primary" } : null,
+    showCourses ? { label: "Browse courses", action: onOpenCourses, tone: "secondary" } : null,
+    showAnnouncements ? { label: "Announcements", action: () => {}, tone: "neutral" } : null,
+  ].filter(Boolean);
   return (
-    <div className="fade-in">
-      <div className="profile-header">
-        <div
-          className="profile-avatar"
-          style={{ overflow: "hidden", padding: 0 }}
-        >
-          {student?.photo_url ? (
-            <img
-              src={student.photo_url}
-              alt={student.full_name || "Student"}
-              style={{ width: "100%", height: "100%", objectFit: "cover" }}
-            />
-          ) : (
-            avatarInitials
-          )}
-        </div>
-        <div>
-          <div className="profile-name">
-            {user?.name || student.full_name}
-            {studentVerified && (
-              <img
-                className="student-verified-badge"
-                src="/student-verified-badge.png"
-                alt="Verified student"
-                title="Verified student"
-              />
-            )}
+    <div className="fade-in admin-dashboard student-dashboard">
+      <div className="student-dashboard-shell">
+        <aside className="student-dashboard-profile-card">
+          <div className="student-dashboard-profile-header">
+            <div className="student-dashboard-avatar">
+              {student?.photo_url ? (
+                <img src={student.photo_url} alt="" />
+              ) : (
+                avatarInitials
+              )}
+            </div>
           </div>
-          <div className="profile-role">
-            Student ID: {student.index} - {student.class}
+
+          <div className="student-dashboard-profile-name">
+            Welcome back, {student.display_name || user?.name || student.full_name}
+            {studentVerified && <StudentVerifiedBadge />}
           </div>
-          <div style={{ marginTop: 6, fontSize: ".82rem", opacity: 0.85 }}>
-            {student.region} Region &nbsp;·&nbsp;{" "}
-            <strong>{cfg.currentTerm}</strong> &nbsp;·&nbsp; {cfg.academicYear}
+
+          <div className="student-dashboard-profile-meta">
+            Student ID: {student.index || "-"}   {student.class || "-"}   {student.region || "-"} Region
           </div>
-          <DashboardDateTime />
-          {selectionEnabled &&
-            cfg.studentSelectionDeadlineVisible !== false &&
-            cfg.selectionDeadline && (
-            <div
-              style={{
-                marginTop: 4,
-                fontSize: ".78rem",
-                color: "#ef4444",
-                fontWeight: 600,
-              }}
-            >
+
+          {selectionEnabled && cfg.studentSelectionDeadlineVisible !== false && cfg.selectionDeadline && (
+            <div className="student-dashboard-profile-deadline">
               Selection Deadline: {cfg.selectionDeadline}
             </div>
           )}
-        </div>
-      </div>
-      <div className="stats-grid">
-        {[
-          resultsEnabled
-            ? {
-                label: "Current Average",
-                value: baseScores.length ? `${avg}%` : "N/A",
-                sub: baseScores.length ? g.grade : "No score records",
-                ic: dashboardGradeColors.icon,
-                bgStart: dashboardGradeColors.start,
-                bgEnd: dashboardGradeColors.end,
-                text: dashboardGradeColors.text,
-                icon: "results",
-              }
-            : {
-                label: "Current Average",
-                value: "—",
-                sub: "Results hidden by admin",
-                ic: "#64748b",
-                bgStart: "#f8fafc",
-                bgEnd: "#dce6f2",
-                text: "#475569",
-                icon: "results",
-              },
-          {
-            label: "Attendance Rate",
-            value: `${Math.round((present / Math.max(attendanceRows.length, 1)) * 100)}%`,
-            sub: `${present}/${attendanceRows.length} days`,
-            ic: "#00b86b",
-            bgStart: "#ecfff5",
-            bgEnd: "#92f0c2",
-            text: "#007a46",
-            icon: "attendance",
-          },
-          ...(feesEnabled
-        ? [
-            {
-              label: "Fees Status",
-              value: outstanding > 0 ? "Outstanding" : "Cleared",
-              sub: `${money.format(outstanding)} outstanding`,
-              ic: outstanding > 0 ? "#ff7a00" : "#00b86b",
-              bgStart: outstanding > 0 ? "#fff4e8" : "#ecfff5",
-              bgEnd: outstanding > 0 ? "#ffc47a" : "#92f0c2",
-              text: outstanding > 0 ? "#a54800" : "#007a46",
-              icon: "fees",
-            },
-          ]
-        : []),
-          ...(selectionEnabled
-        ? [
-            {
-              label: "Selection",
-              value: selectionLabel,
-              sub: `${selectionCount} choice(s) made`,
-              ic: "#c026ff",
-              bgStart: "#fdf0ff",
-              bgEnd: "#efadff",
-              text: "#8610b3",
-              icon: "selection",
-            },
-          ]
-        : []),
-        ].map((s) => (
-          <div
-            key={s.label}
-            className="stat-card dashboard-stat-card"
-            style={{
-              "--dash-bg-start": s.bgStart,
-              "--dash-bg-end": s.bgEnd,
-              "--dash-accent": s.ic,
-              "--dash-text": s.text,
-              "--dash-border": "rgba(148,163,184,.18)",
-              "--dash-glow": "rgba(255,255,255,.82)",
-              "--dash-shadow": "rgba(30,41,59,.22)",
-            }}
-          >
-            <div className="stat-icon">
-              <Ico name={s.icon} size={20} color={s.ic} />
-            </div>
-            <div className="stat-label">{s.label}</div>
-            <div className="stat-value" style={{ fontSize: "1.5rem" }}>
-              {s.value}
-            </div>
-            <div className="stat-sub">{s.sub}</div>
-          </div>
-        ))}
-      </div>
-      <section className="card card-padded learning-dashboard-cta" style={{ marginTop: 16 }}>
-        <div>
-          <h3>Ready to study?</h3>
-          <p>Find BECE preparation, WASSCE lessons, and university course materials selected for your learning level.</p>
-        </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-          <button className="btn btn-blue" type="button" onClick={onOpenCourses}>
-            Browse courses
-          </button>
-          <button className="btn btn-outline" type="button" onClick={onOpenLearningLibrary}>
-            Open learning library
-          </button>
-        </div>
-      </section>
-      <div className="card card-padded" style={{ marginTop: 12 }}>
-        <h3 style={{ fontWeight: 700, marginBottom: 12 }}>Announcements</h3>
-        {ANNOUNCEMENTS.map((a) => (
-          <div
-            key={a.id}
-            className={`alert ${a.type === "urgent" ? "alert-danger" : a.type === "info" ? "alert-info" : "alert-warning"}`}
-            style={{ marginBottom: 8 }}
-          >
-            <strong>{a.title}</strong> — {a.body}{" "}
-            <span style={{ opacity: 0.7, fontSize: ".78rem" }}>({a.date})</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
-// â”€â”€â”€ STUDENT PROFILE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-function StudentProfile({ user, studentData }) {
-  const { cfg } = useContext(SettingsContext);
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [passwordMessage, setPasswordMessage] = useState("");
-  const [savingPassword, setSavingPassword] = useState(false);
-  const isLoadingProfile = !studentData;
-  const student = studentData || {
-    full_name: "Loading profile...",
-    index: "--",
-    class: "--",
-    region: "--",
-    aggregate: null,
-    photo_url: "",
-  };
-  const initials = String(student?.full_name || user?.name || "ST")
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase();
-  const aggregateValue = isLoadingProfile
-    ? null
-    : Number(student?.aggregate ?? 0);
-  const readiness =
-    aggregateValue == null ? null : Math.max(0, 100 - aggregateValue * 5);
-  const readinessGrade = getGrade(readiness);
-  const supportEmail = cfg.supportEmail || "support@campusghana.edu";
-  const supportPhone = cfg.supportPhone || "+233 00 000 0000";
-  const changePassword = async () => {
-    if (newPassword.length < 10) {
-      setPasswordMessage("Choose a password with at least 10 characters.");
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      setPasswordMessage("The passwords do not match.");
-      return;
-    }
-    if (!supabase) {
-      setPasswordMessage("Supabase is not configured; the password was not changed.");
-      return;
-    }
-    setSavingPassword(true);
-    setPasswordMessage("");
-    const { error } = await supabase.auth.updateUser({
-      password: newPassword,
-      data: { campus_student_password_changed: true },
-    });
-    if (error) {
-      setPasswordMessage(`Password was not changed: ${error.message}`);
-    } else {
-      setPasswordMessage("Password changed successfully.");
-      setNewPassword("");
-      setConfirmPassword("");
-    }
-    setSavingPassword(false);
-  };
-
-  return (
-    <div className="fade-in">
-      <div className="page-header">
-        <div className="page-title">My Profile</div>
-        <div className="page-sub">
-          {cfg.systemName} • {cfg.currentTerm} • {cfg.academicYear}
-        </div>
-      </div>
-      <section className="card card-padded" style={{ marginBottom: 16 }}>
-        <div className="page-title" style={{ fontSize: "1rem" }}>
-          Change Password
-        </div>
-        <p className="page-sub">
-          Keep your password private. If your school created your account with a temporary password, change it now.
-        </p>
-        <div className="form-grid">
-          <div className="form-group">
-            <label className="form-label" htmlFor="student-new-password">
-              New password
-            </label>
-            <input
-              id="student-new-password"
-              className="form-control"
-              type="password"
-              autoComplete="new-password"
-              minLength={10}
-              value={newPassword}
-              onChange={(event) => setNewPassword(event.target.value)}
-            />
-          </div>
-          <div className="form-group">
-            <label className="form-label" htmlFor="student-confirm-password">
-              Confirm new password
-            </label>
-            <input
-              id="student-confirm-password"
-              className="form-control"
-              type="password"
-              autoComplete="new-password"
-              value={confirmPassword}
-              onChange={(event) => setConfirmPassword(event.target.value)}
-            />
-          </div>
-        </div>
-        <button
-          className="btn btn-blue"
-          type="button"
-          onClick={changePassword}
-          disabled={savingPassword || !newPassword || !confirmPassword}
-        >
-          {savingPassword ? "Changing Password..." : "Change Password"}
-        </button>
-        {passwordMessage && (
-          <div className="alert alert-info" role="status" style={{ marginTop: 12 }}>
-            {passwordMessage}
-          </div>
-        )}
-      </section>
-      {isLoadingProfile && (
-        <div className="alert alert-info">Loading your profile data...</div>
-      )}
-      <div className="student-profile-shell">
-        <section className="student-profile-hero">
-          <div
-            className="student-profile-avatar"
-            style={{ overflow: "hidden", padding: 0 }}
-          >
-            {student?.photo_url ? (
-              <img
-                src={student.photo_url}
-                alt={student.full_name || "Student"}
-                style={{ width: "100%", height: "100%", objectFit: "cover" }}
-              />
-            ) : (
-              initials || "ST"
+          <div className="student-dashboard-mini-grid">
+            {resultsEnabled && (
+              <div className="student-dashboard-mini-item">
+                <span>Current average</span>
+                <strong>{avg === null ? "N/A" : `${avg}%`}</strong>
+              </div>
+            )}
+            {attendanceEnabled && (
+              <div className="student-dashboard-mini-item">
+                <span>Attendance</span>
+                <strong>{present}/{attendanceRows.length || 0}</strong>
+              </div>
+            )}
+            {feesEnabled && (
+              <div className="student-dashboard-mini-item">
+                <span>Fees</span>
+                <strong>{money.format(outstanding)}</strong>
+              </div>
             )}
           </div>
-          <div>
-            <div className="student-profile-title">
-              {student.full_name || user?.name || "Student"}
-              {String(student.status || "").toLowerCase() === "confirmed" && (
-                <img
-                  className="student-verified-badge"
-                  src="/student-verified-badge.png"
-                  alt="Verified student"
-                  title="Verified student"
-                />
-              )}
+
+          {quickLinks.length > 0 && (
+            <div className="student-dashboard-quick-links" aria-label="Student quick actions">
+              {quickLinks.map((link) => (
+                <button
+                  key={link.label}
+                  type="button"
+                  className={`student-dashboard-quick-link ${link.tone}`}
+                  onClick={link.action}
+                >
+                  {link.label}
+                </button>
+              ))}
             </div>
-            <div className="student-profile-meta">
-              Student ID: {student.index || "-"} • {student.class || "-"} •{" "}
-              {student.region || "-"} Region
+          )}
+        </aside>
+
+        <div className="student-dashboard-main-column">
+          <div className="student-dashboard-progress-row" aria-label="Daily progress overview">
+            <div className="student-dashboard-progress-card accent">
+              <span className="student-dashboard-card-kicker">DP</span>
+              <strong>Daily Progress</strong>
+              <div className="student-dashboard-progress-value">{dailyProgressValue}%</div>
+              <small>{courseSummary.enrolledCount ? "Updated from enrolled courses" : "No enrolled courses yet"}</small>
+            </div>
+            <div className="student-dashboard-progress-card">
+              <span className="student-dashboard-card-kicker">Progress</span>
+              <strong>Course completion</strong>
+              <div className="student-dashboard-progress-value">{courseCompletionValue}%</div>
+              <small>{courseSummary.enrolledCount ? `${courseSummary.enrolledCount} active course${courseSummary.enrolledCount === 1 ? "" : "s"}` : "Start a course"}</small>
+            </div>
+            <div className="student-dashboard-progress-card warm">
+              <span className="student-dashboard-card-kicker">Focus</span>
+              <strong>Study streak</strong>
+              <div className="student-dashboard-progress-value">{studyStreakText}</div>
+              <small>{courseSummary.enrolledCount ? "Consistent effort" : "Set your study rhythm"}</small>
             </div>
           </div>
-          <div className="student-profile-term">
-            <small>Academic Session</small>
-            <strong>{cfg.currentTerm}</strong>
-            <span style={{ fontSize: ".78rem", color: "#e2e8f0" }}>
-              {cfg.academicYear}
-            </span>
+          <div className="student-dashboard-hero-card">
+            <div className="student-dashboard-header-meta">
+              <DashboardDateTime />
+              <div className="admin-dashboard-period">Academic Year {cfg.academicYear}   {cfg.currentTerm}</div>
+            </div>
+
+            {dashboardMetrics.length > 0 && (
+              <div className="student-dashboard-metric-row">
+                {dashboardMetrics.map((s) => (
+                  <div
+                    key={s.label}
+                    className="student-dashboard-metric-tile"
+                    style={{
+                      "--dash-bg-start": s.bgStart,
+                      "--dash-bg-end": s.bgEnd,
+                      "--dash-accent": s.ic,
+                      "--dash-text": s.text,
+                    }}
+                  >
+                    <div className="stat-icon">
+                      <Ico name={s.icon} size={18} color={s.ic} />
+                    </div>
+                    <div className="stat-label">{s.label}</div>
+                    <div className="stat-value">{s.value}</div>
+                    <div className="stat-sub">{s.sub}</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-        </section>
 
-        <section className="student-profile-grid">
-          <article className="student-profile-card">
-            <div className="student-profile-card-head">
-              <h3>Personal &amp; Academic</h3>
-              {String(student.status || "").toLowerCase() === "confirmed" ? (
-                <span className="badge badge-success">Confirmed</span>
-              ) : (
-                <span className="badge badge-warning">Pending Verification</span>
+          <div className="student-dashboard-progress-panel">
+            <div className="student-dashboard-panel-heading">
+              <span className="admin-dashboard-panel-eyebrow">Progress</span>
+              <h3>Learning momentum</h3>
+            </div>
+            <div className="student-dashboard-progress-list">
+              {progressItems.map((item, index) => (
+                <div className="student-dashboard-progress-item" key={`${item.title}-${index}`}>
+                  <div className="student-dashboard-progress-copy">
+                    <span>{item.title}</span>
+                    <strong>{Math.min(100, Math.max(0, Number(item.percent) || 0))}%</strong>
+                  </div>
+                  <div className="student-dashboard-progress-bar"><i style={{ width: `${Math.min(100, Math.max(0, Number(item.percent) || 0))}%` }} /></div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="student-dashboard-lower-grid">
+            <section className="student-dashboard-summary-panel">
+              <div className="admin-dashboard-panel-heading">
+                <div>
+                  <span className="admin-dashboard-panel-eyebrow">YOUR PORTAL</span>
+                  <h3>At a glance</h3>
+                </div>
+              </div>
+              <div className="student-dashboard-snapshot-list">
+                {resultsEnabled && (
+                  <div className="student-dashboard-snapshot-row">
+                    <span>Current average</span>
+                    <strong>{avg === null ? "No scores" : `${avg}%`}</strong>
+                  </div>
+                )}
+                {attendanceEnabled && (
+                  <div className="student-dashboard-snapshot-row">
+                    <span>Attendance</span>
+                    <strong>{present} of {attendanceRows.length} days</strong>
+                  </div>
+                )}
+                {selectionEnabled && (
+                  <div className="student-dashboard-snapshot-row">
+                    <span>School selection</span>
+                    <strong>{selectionLabel}   {selectionCount}</strong>
+                  </div>
+                )}
+                {feesEnabled && (
+                  <div className="student-dashboard-snapshot-row">
+                    <span>Fees outstanding</span>
+                    <strong>{money.format(outstanding)}</strong>
+                  </div>
+                )}
+              </div>
+              {(showCourses || showStudyContent) && (
+                <div className="student-dashboard-actions">
+                  {showCourses && (
+                    <button className="btn btn-blue" type="button" onClick={onOpenCourses}>
+                      Browse courses
+                    </button>
+                  )}
+                  {showStudyContent && (
+                    <button className="btn btn-outline" type="button" onClick={onOpenLearningLibrary}>
+                      Study library
+                    </button>
+                  )}
+                </div>
               )}
-            </div>
-            <div className="student-profile-card-body">
-              <div className="student-profile-list">
-                <div className="student-profile-row">
-                  <label>Full Name</label>
-                  <span>{student.full_name || user?.name || "-"}</span>
-                </div>
-                <div className="student-profile-row">
-                  <label>Display Name</label>
-                  <span>{student.display_name || "-"}</span>
-                </div>
-                <div className="student-profile-row">
-                  <label>Student ID</label>
-                  <span>{student.index || "-"}</span>
-                </div>
-                <div className="student-profile-row">
-                  <label>Class</label>
-                  <span>{student.class || "-"}</span>
-                </div>
-                <div className="student-profile-row">
-                  <label>Region</label>
-                  <span>{student.region || "-"}</span>
-                </div>
-                <div className="student-profile-row">
-                  <label>District</label>
-                  <span>{student.district || "-"}</span>
-                </div>
-                <div className="student-profile-row">
-                  <label>Institution or School</label>
-                  <span>{student.institution || "-"}</span>
-                </div>
-                <div className="student-profile-row">
-                  <label>Gender</label>
-                  <span>{student.gender || "-"}</span>
-                </div>
-                <div className="student-profile-row">
-                  <label>Date of Birth</label>
-                  <span>
-                    {student.date_of_birth
-                      ? (() => {
-                          const dt = new Date(student.date_of_birth);
-                          if (isNaN(dt.getTime())) return student.date_of_birth;
-                          return dt.toLocaleDateString(undefined, {
-                            year: "numeric",
-                            month: "short",
-                            day: "numeric",
-                          });
-                        })()
-                      : "-"}
-                  </span>
-                </div>
-                <div className="student-profile-row">
-                  <label>Aggregate</label>
-                  <span>
-                    {Number.isFinite(aggregateValue) ? aggregateValue : "-"}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </article>
+            </section>
 
-          <article className="student-profile-card">
-            <div className="student-profile-card-head">
-              <h3>Contact</h3>
-            </div>
-            <div className="student-profile-card-body">
-              <div className="student-profile-list">
-                <div className="student-profile-row">
-                  <label>Parent Contact</label>
-                  <span>{student.parent_contact || "-"}</span>
+            {showAnnouncements && (
+              <section className="student-dashboard-news-panel">
+                <div className="admin-dashboard-panel-heading">
+                  <div>
+                    <span className="admin-dashboard-panel-eyebrow">UPDATES</span>
+                    <h3>Latest notice</h3>
+                  </div>
                 </div>
-                <div className="student-profile-row">
-                  <label>Personal Contact</label>
-                  <span>{student.personal_contact || "-"}</span>
+                <div className="student-dashboard-news-box">
+                  <strong>{ANNOUNCEMENTS[0]?.title}</strong>
+                  <p>{ANNOUNCEMENTS[0]?.body}</p>
                 </div>
-                <div className="student-profile-row">
-                  <label>Email</label>
-                  <span>{student.contact_email || "-"}</span>
-                </div>
-              </div>
-            </div>
-          </article>
-
-          <article className="student-profile-card">
-            <div className="student-profile-card-head">
-              <h3>Address &amp; Residence</h3>
-            </div>
-            <div className="student-profile-card-body">
-              <div className="student-profile-list">
-                <div className="student-profile-row">
-                  <label>Home Address</label>
-                  <span>{student.home_address || "-"}</span>
-                </div>
-                <div className="student-profile-row">
-                  <label>Home Town</label>
-                  <span>{student.home_town || "-"}</span>
-                </div>
-                <div className="student-profile-row">
-                  <label>Place of Residence</label>
-                  <span>{student.place_of_residence || "-"}</span>
-                </div>
-                <div className="student-profile-row">
-                  <label>Postal Town</label>
-                  <span>{student.postal_town || "-"}</span>
-                </div>
-                <div className="student-profile-row">
-                  <label>PO Box</label>
-                  <span>{student.po_box || "-"}</span>
-                </div>
-              </div>
-            </div>
-          </article>
-
-          <article className="student-profile-card">
-            <div className="student-profile-card-head">
-              <h3>Support &amp; Readiness</h3>
-              <span className="badge badge-success">Live</span>
-            </div>
-            <div className="student-profile-card-body">
-              <div className="student-profile-kpis">
-                <div
-                  className="student-profile-kpi"
-                  style={{ background: readinessGrade.bg }}
-                >
-                  <label style={{ color: readinessGrade.color }}>
-                    Readiness Score
-                  </label>
-                  <strong style={{ color: readinessGrade.color }}>
-                    {readiness == null
-                      ? "Loading..."
-                      : `${readiness}% (${readinessGrade.grade})`}
-                  </strong>
-                  <small style={{ color: readinessGrade.color }}>
-                    {readiness == null
-                      ? "Will calculate after profile loads"
-                      : "Estimated from your current aggregate"}
-                  </small>
-                </div>
-                <div
-                  className="student-profile-kpi"
-                  style={{ background: "#eff6ff" }}
-                >
-                  <label style={{ color: "#1d4ed8" }}>Support Email</label>
-                  <strong style={{ color: "#1e3a8a", fontSize: ".9rem" }}>
-                    {supportEmail}
-                  </strong>
-                </div>
-                <div
-                  className="student-profile-kpi"
-                  style={{ background: "#f0fdf4" }}
-                >
-                  <label style={{ color: "#15803d" }}>Support Phone</label>
-                  <strong style={{ color: "#166534", fontSize: ".9rem" }}>
-                    {supportPhone}
-                  </strong>
-                </div>
-              </div>
-              <p className="student-profile-help">
-                Profile information is synced with school records. Contact
-                support if any field appears incorrect.
-              </p>
-            </div>
-          </article>
-        </section>
+              </section>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
 }
 
-// â”€â”€â”€ STUDENT ATTENDANCE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//   STUDENT PROFILE
+const StudentProfile = lazy(() =>
+  import("./src/components/StudentProfilePage.jsx").then((module) => ({
+    default: module.StudentProfile,
+  })),
+);
+
+//   STUDENT ATTENDANCE
 function StudentAttendance({ attendanceData }) {
   const { cfg } = useContext(SettingsContext);
   const rows = Array.isArray(attendanceData) ? attendanceData : [];
@@ -15599,7 +15449,7 @@ function StudentAttendance({ attendanceData }) {
   );
 }
 
-// â”€â”€â”€ STUDENT FEES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//   STUDENT FEES
 function StudentFees({ feesData }) {
   const { cfg } = useContext(SettingsContext);
   const feesEnabled = cfg.studentFeesPortalEnabled !== false;
@@ -15684,7 +15534,7 @@ function StudentFees({ feesData }) {
   );
 }
 
-// â”€â”€â”€ STUDENT SCHOOL SELECTION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//   STUDENT SCHOOL SELECTION
 function SchoolSelection({ schoolsData, studentData }) {
   const { cfg } = useContext(SettingsContext);
   const maxChoices = cfg.maxChoices || 7;
@@ -15846,7 +15696,7 @@ function SchoolSelection({ schoolsData, studentData }) {
     <div className="fade-in">
       <div className="page-header">
         <div className="page-title">Select Schools</div>
-        <div className="page-sub">{`Choose ${maxChoices} secondary schools in an approved pattern (${schools.length} schools available: A ${counts.A}, B ${counts.B}, C ${counts.C})${cfg.selectionDeadline ? " — Deadline: " + cfg.selectionDeadline : ""}`}</div>
+        <div className="page-sub">{`Choose ${maxChoices} secondary schools in an approved pattern (${schools.length} schools available: A ${counts.A}, B ${counts.B}, C ${counts.C})${cfg.selectionDeadline ? "   Deadline: " + cfg.selectionDeadline : ""}`}</div>
       </div>
       {selectionError && <div className="alert alert-warning">{selectionError}</div>}
       {loadingSelection && (
@@ -16019,7 +15869,7 @@ function SchoolSelection({ schoolsData, studentData }) {
   );
 }
 
-// â”€â”€â”€ MY SELECTION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//   MY SELECTION
 function MySelection({ selectionRow, approvalInfo }) {
   const rows = normalizeSelectionList(selectionRow);
   const status = String(selectionRow?.status || "not-submitted").toLowerCase();
@@ -16093,7 +15943,7 @@ function MySelection({ selectionRow, approvalInfo }) {
   );
 }
 
-// â”€â”€â”€ STUDENT DOCS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//   STUDENT DOCS
 function DocumentsPage() {
   const { records: documents, loading, error } =
     useStudentPortalRecords("student_document");
@@ -16274,7 +16124,7 @@ function AssignmentTrackerPage() {
                 <div>
                   <div className="mobile-record-title">{t.title}</div>
                   <div className="mobile-record-sub">
-                    {t.subject} • Due {t.due}
+                    {t.subject}   Due {t.due}
                   </div>
                 </div>
                 <span
@@ -16374,7 +16224,7 @@ function ExamSchedulePage() {
                 <div>
                   <div className="mobile-record-title">{r.subject}</div>
                   <div className="mobile-record-sub">
-                    {r.date} • {r.time}
+                    {r.date}   {r.time}
                   </div>
                 </div>
                 <strong>{r.seat}</strong>
@@ -16420,7 +16270,10 @@ function ExamSchedulePage() {
 
 function ReportCardPage({ studentData, attendanceData, feesData }) {
   const { cfg } = useContext(SettingsContext);
-  const feesEnabled = cfg.studentFeesPortalEnabled !== false;
+  const navVisibility = getStudentNavVisibility(cfg);
+  const feesEnabled =
+    navVisibility.fees && cfg.studentFeesPortalEnabled !== false;
+  const attendanceEnabled = navVisibility.attendance;
   const student = studentData || {
     full_name: "Student",
     index: "-",
@@ -16454,10 +16307,10 @@ function ReportCardPage({ studentData, attendanceData, feesData }) {
       `Name: ${student.full_name}`,
       `Student ID: ${student.index}`,
       `Class: ${student.class}`,
-      `Attendance Rate: ${attendanceRate}%`,
+      ...(attendanceEnabled ? [`Attendance Rate: ${attendanceRate}%`] : []),
       ...(feesEnabled
         ? [`Outstanding Fees: GHS ${totalOutstanding}`]
-        : [`Fees section disabled`]),
+        : []),
       `Generated: ${new Date().toLocaleString()}`,
     ];
     lines.forEach((line) => {
@@ -16486,17 +16339,14 @@ function ReportCardPage({ studentData, attendanceData, feesData }) {
           <div>
             <strong>Class:</strong> {student.class}
           </div>
-          <div>
-            <strong>Attendance Rate:</strong> {attendanceRate}%
-          </div>
+          {attendanceEnabled && (
+            <div>
+              <strong>Attendance Rate:</strong> {attendanceRate}%
+            </div>
+          )}
           {feesEnabled && (
             <div>
               <strong>Outstanding Fees:</strong> GHS {totalOutstanding}
-            </div>
-          )}
-          {!feesEnabled && (
-            <div>
-              <strong>Outstanding Fees:</strong> Fees are disabled
             </div>
           )}
         </div>
@@ -16594,7 +16444,7 @@ function StudentAcademicResultsPage({ scoreRecords }) {
               Results Analytics
             </h2>
             <span style={{ color: "#64748b", fontSize: ".82rem" }}>
-              {latestTerm[0]} · {latestYear[0]}
+              {latestTerm[0]}   {latestYear[0]}
             </span>
           </div>
           <div className="stats-grid stats-grid-3">
@@ -16822,7 +16672,7 @@ function StudentAcademicResultsPage({ scoreRecords }) {
                     >
                       <h3 style={{ margin: 0, fontSize: "1rem" }}>{term}</h3>
                       <span style={{ color: "#64748b", fontSize: ".82rem" }}>
-                        Average: {averageOf(termRecords)}% · {termRecords.length}{" "}
+                        Average: {averageOf(termRecords)}%   {termRecords.length}{" "}
                         result{termRecords.length === 1 ? "" : "s"}
                       </span>
                     </div>
@@ -18179,6 +18029,13 @@ function StudentTicketsPage() {
                 <label>Message</label>
                 <span>{t.message}</span>
               </div>
+              {t.admin_response && (
+                <div className="mobile-record-item">
+                  <label>Admin response</label>
+                  <span>{t.admin_response}</span>
+                  {t.responded_at && <small>{new Date(t.responded_at).toLocaleString()}</small>}
+                </div>
+              )}
             </div>
           ))}
           {!tickets.length && (
@@ -18198,10 +18055,11 @@ function StudentTicketsPage() {
                 <th>When</th>
                 <th>Subject</th>
                 <th>Status</th>
+                <th>Admin response</th>
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td colSpan="3">Loading saved tickets...</td></tr>}
+              {loading && <tr><td colSpan="4">Loading saved tickets...</td></tr>}
               {tickets.map((t) => (
                 <tr key={t.id}>
                   <td>{new Date(t.submitted_at).toLocaleString()}</td>
@@ -18209,12 +18067,16 @@ function StudentTicketsPage() {
                   <td>
                     <span className="badge badge-warning">{t.status}</span>
                   </td>
+                  <td>
+                    {t.admin_response || "No response yet"}
+                    {t.responded_at && <div className="students-table-sub">{new Date(t.responded_at).toLocaleString()}</div>}
+                  </td>
                 </tr>
               ))}
               {!tickets.length && (
                 <tr>
                   <td
-                    colSpan="3"
+                    colSpan="4"
                     style={{
                       textAlign: "center",
                       padding: 18,
@@ -18437,7 +18299,7 @@ function LearningResourcesPage() {
                 </div>
                 <div className="mobile-record-item">
                   <label>Rating</label>
-                  <span>⭐ {c.rating}</span>
+                  <span>  {c.rating}</span>
                 </div>
               </div>
               <div className="mobile-record-actions">
@@ -18466,7 +18328,7 @@ function LearningResourcesPage() {
                   <td>{c.instructor}</td>
                   <td>{c.price}</td>
                   <td>{c.students}</td>
-                  <td>⭐ {c.rating}</td>
+                  <td>  {c.rating}</td>
                   <td><button className="btn btn-sm btn-blue">Enroll</button></td>
                 </tr>
               ))}
@@ -18501,7 +18363,7 @@ function LearningResourcesPage() {
         {["Algebra Fundamentals", "Chemistry Reactions", "Biology Cells", "Physics Forces", "Literature Analysis"].map((quiz, i) => (
           <div key={i} className="card card-padded" style={{ marginBottom: 0 }}>
             <div style={{ fontWeight: 700, marginBottom: 8 }}>{quiz}</div>
-            <div style={{ color: "#64748b", fontSize: ".9rem", marginBottom: 12 }}>10 questions • 5 minutes</div>
+            <div style={{ color: "#64748b", fontSize: ".9rem", marginBottom: 12 }}>10 questions   5 minutes</div>
             <button className="btn btn-sm btn-blue" style={{ width: "100%" }}>Start Quiz</button>
           </div>
         ))}
@@ -18602,7 +18464,7 @@ function LearningResourcesPage() {
                 </div>
                 <div className="mobile-record-item">
                   <label>Rating</label>
-                  <span>⭐ {r.rating}</span>
+                  <span>  {r.rating}</span>
                 </div>
               </div>
               <div className="mobile-record-actions">
@@ -18631,7 +18493,7 @@ function LearningResourcesPage() {
                   <td>{r.title}</td>
                   <td>{r.type}</td>
                   <td>{r.downloads}</td>
-                  <td>⭐ {r.rating}</td>
+                  <td>  {r.rating}</td>
                   <td><button className="btn btn-sm btn-outline">Download</button></td>
                 </tr>
               ))}
@@ -18646,10 +18508,10 @@ function LearningResourcesPage() {
     <div className="fade-in">
       <div style={{ display: "flex", gap: 8, marginBottom: 16, borderBottom: "1px solid #e2e8f0", paddingBottom: 12, flexWrap: "wrap" }}>
         {[
-          { key: "browse", label: "📚 Courses" },
-          { key: "quiz", label: "✏️ Quizzes" },
-          { key: "resources", label: "📄 Materials" },
-          { key: "community", label: "💬 Community" },
+          { key: "browse", label: "  Courses" },
+          { key: "quiz", label: "  Quizzes" },
+          { key: "resources", label: "  Materials" },
+          { key: "community", label: "  Community" },
         ].map((tab) => (
           <button
             key={tab.key}
@@ -18930,7 +18792,7 @@ function TimetablePage() {
                 <div>
                   <div className="mobile-record-title">{r.className}</div>
                   <div className="mobile-record-sub">
-                    {r.day} • {r.period}
+                    {r.day}   {r.period}
                   </div>
                 </div>
                 <strong>{r.subject}</strong>
@@ -19922,7 +19784,7 @@ function PeerTutoringPage() {
   return (
     <div className="fade-in">
       <div className="page-header">
-        <div className="page-title">👥 Peer Tutoring Platform</div>
+        <div className="page-title">  Peer Tutoring Platform</div>
         <div className="page-sub">Connect students for one-on-one tutoring sessions</div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 16, marginBottom: 24 }}>
@@ -19951,7 +19813,7 @@ function PeerTutoringPage() {
               <tr key={t.id}>
                 <td style={{ fontWeight: 600 }}>{t.name}</td>
                 <td>{t.subject}</td>
-                <td>⭐ {t.rating}</td>
+                <td>  {t.rating}</td>
                 <td>{t.sessions}</td>
                 <td>{t.students}</td>
               </tr>
@@ -19971,14 +19833,14 @@ function MentalHealthPortal({ currentUser = {} }) {
   return (
     <div className="fade-in">
       <div className="page-header">
-        <div className="page-title">💬 Mental Health & Counseling</div>
+        <div className="page-title">  Mental Health & Counseling</div>
         <div className="page-sub">Support and resources for student wellbeing</div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16 }}>
         {counselors.map((c) => (
           <div key={c.id} className="card" style={{ padding: 16, border: "1px solid #e2e8f0" }}>
             <div style={{ fontWeight: 700, marginBottom: 8 }}>{c.name}</div>
-            <div style={{ fontSize: ".9em", color: "#64748b", marginBottom: 12 }}>📚 {c.specialization}</div>
+            <div style={{ fontSize: ".9em", color: "#64748b", marginBottom: 12 }}>  {c.specialization}</div>
             <button className="btn btn-blue" style={{ width: "100%" }}>
               {c.available ? "Book Session" : "Coming Soon"}
             </button>
@@ -19997,7 +19859,7 @@ function LibraryManagementPage() {
   return (
     <div className="fade-in">
       <div className="page-header">
-        <div className="page-title">📚 Library Management</div>
+        <div className="page-title">  Library Management</div>
         <div className="page-sub">Book catalog and borrowing system</div>
       </div>
       <div className="card table-wrap">
@@ -20036,7 +19898,7 @@ function AlumniPortalPage() {
   return (
     <div className="fade-in">
       <div className="page-header">
-        <div className="page-title">🎓 Alumni Portal & Networking</div>
+        <div className="page-title">  Alumni Portal & Networking</div>
         <div className="page-sub">Connect with graduates and track their success</div>
       </div>
       <div className="card table-wrap">
@@ -20073,7 +19935,7 @@ function ScholarshipManagementPage() {
   return (
     <div className="fade-in">
       <div className="page-header">
-        <div className="page-title">🎖️ Scholarship Management</div>
+        <div className="page-title">  Scholarship Management</div>
         <div className="page-sub">Track scholarships and eligibility</div>
       </div>
       <div className="card table-wrap">
@@ -20110,7 +19972,7 @@ function ParentTeacherConferencePage() {
   return (
     <div className="fade-in">
       <div className="page-header">
-        <div className="page-title">👨‍🏫 Parent-Teacher Conferences</div>
+        <div className="page-title">  Parent-Teacher Conferences</div>
         <div className="page-sub">Schedule and manage meetings with parents</div>
       </div>
       <div className="card table-wrap">
@@ -20149,7 +20011,7 @@ function MedicalRecordsPage() {
   return (
     <div className="fade-in">
       <div className="page-header">
-        <div className="page-title">⚕️ Medical Records</div>
+        <div className="page-title">  Medical Records</div>
         <div className="page-sub">Health information and emergency contacts</div>
       </div>
       <div className="card table-wrap">
@@ -20186,7 +20048,7 @@ function TransportHostelPage() {
   return (
     <div className="fade-in">
       <div className="page-header">
-        <div className="page-title">🚌 Transport & Hostel Management</div>
+        <div className="page-title">  Transport & Hostel Management</div>
         <div className="page-sub">Bus tracking and boarding student management</div>
       </div>
       <div className="card table-wrap">
@@ -20207,7 +20069,7 @@ function TransportHostelPage() {
                 <td>{b.driver}</td>
                 <td>{b.capacity}</td>
                 <td><span style={{ background: "#e0e7ff", padding: "4px 8px", borderRadius: 4 }}>{b.occupied}/{b.capacity}</span></td>
-                <td><span style={{ background: "#ecfdf5", padding: "4px 8px", borderRadius: 4, color: "#059669", fontWeight: 600 }}>🟢 {b.status}</span></td>
+                <td><span style={{ background: "#ecfdf5", padding: "4px 8px", borderRadius: 4, color: "#059669", fontWeight: 600 }}>  {b.status}</span></td>
               </tr>
             ))}
           </tbody>
@@ -20225,15 +20087,15 @@ function VirtualClassroomPage() {
   return (
     <div className="fade-in">
       <div className="page-header">
-        <div className="page-title">🏫 Virtual Classroom</div>
+        <div className="page-title">  Virtual Classroom</div>
         <div className="page-sub">Interactive online learning environment</div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16, marginBottom: 24 }}>
         {classes.map((c) => (
           <div key={c.id} className="card" style={{ padding: 16, border: "1px solid #e2e8f0" }}>
             <div style={{ fontWeight: 700, marginBottom: 8 }}>{c.name}</div>
-            <div style={{ fontSize: ".9em", color: "#64748b", marginBottom: 4 }}>👨‍🏫 {c.instructor}</div>
-            <div style={{ fontSize: ".9em", color: "#64748b", marginBottom: 12 }}>👥 {c.students} students • ⏱️ {c.duration}</div>
+            <div style={{ fontSize: ".9em", color: "#64748b", marginBottom: 4 }}>  {c.instructor}</div>
+            <div style={{ fontSize: ".9em", color: "#64748b", marginBottom: 12 }}>  {c.students} students     {c.duration}</div>
             <button className="btn btn-blue" style={{ width: "100%" }}>
               {c.status === "Live" ? "Join Class" : "View Details"}
             </button>
@@ -20252,15 +20114,15 @@ function CourseMarketplacePage() {
   return (
     <div className="fade-in">
       <div className="page-header">
-        <div className="page-title">🛒 Course Marketplace</div>
+        <div className="page-title">  Course Marketplace</div>
         <div className="page-sub">Browse and enroll in courses from global educators</div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16 }}>
         {courses.map((c) => (
           <div key={c.id} className="card" style={{ padding: 16, border: "1px solid #e2e8f0" }}>
             <div style={{ fontWeight: 700, marginBottom: 8 }}>{c.title}</div>
-            <div style={{ fontSize: ".9em", color: "#64748b", marginBottom: 4 }}>👨‍🏫 {c.instructor}</div>
-            <div style={{ fontSize: ".9em", color: "#64748b", marginBottom: 8 }}>📚 {c.category} • ⭐ {c.rating} • 👥 {c.students}</div>
+            <div style={{ fontSize: ".9em", color: "#64748b", marginBottom: 4 }}>  {c.instructor}</div>
+            <div style={{ fontSize: ".9em", color: "#64748b", marginBottom: 8 }}>  {c.category}     {c.rating}     {c.students}</div>
             <div style={{ fontSize: "1.2em", fontWeight: 700, color: "#059669", marginBottom: 12 }}>{c.price}</div>
             <button className="btn btn-blue" style={{ width: "100%" }}>Enroll Now</button>
           </div>
@@ -20278,15 +20140,15 @@ function LiveStreamingPage() {
   return (
     <div className="fade-in">
       <div className="page-header">
-        <div className="page-title">📺 Live Streaming</div>
+        <div className="page-title">  Live Streaming</div>
         <div className="page-sub">Real-time educational broadcasts</div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16 }}>
         {streams.map((s) => (
           <div key={s.id} className="card" style={{ padding: 16, border: "1px solid #e2e8f0" }}>
             <div style={{ fontWeight: 700, marginBottom: 8 }}>{s.title}</div>
-            <div style={{ fontSize: ".9em", color: "#64748b", marginBottom: 4 }}>👨‍🏫 {s.instructor}</div>
-            <div style={{ fontSize: ".9em", color: "#64748b", marginBottom: 12 }}>👁️ {s.viewers} viewers • ⏱️ {s.duration}</div>
+            <div style={{ fontSize: ".9em", color: "#64748b", marginBottom: 4 }}>  {s.instructor}</div>
+            <div style={{ fontSize: ".9em", color: "#64748b", marginBottom: 12 }}>  {s.viewers} viewers     {s.duration}</div>
             <button className="btn btn-blue" style={{ width: "100%" }}>
               {s.status === "Live" ? "Watch Live" : "Set Reminder"}
             </button>
@@ -20301,11 +20163,11 @@ function InteractiveWhiteboardPage() {
   return (
     <div className="fade-in">
       <div className="page-header">
-        <div className="page-title">🎨 Interactive Whiteboard</div>
+        <div className="page-title">  Interactive Whiteboard</div>
         <div className="page-sub">Collaborative digital drawing and annotation tools</div>
       </div>
       <div className="card" style={{ padding: 24, textAlign: "center" }}>
-        <div style={{ fontSize: "4em", marginBottom: 16 }}>🎨</div>
+        <div style={{ fontSize: "4em", marginBottom: 16 }}> </div>
         <div style={{ fontSize: "1.2em", fontWeight: 700, marginBottom: 8 }}>Interactive Whiteboard</div>
         <div style={{ color: "#64748b", marginBottom: 24 }}>Digital drawing tools, annotations, and collaborative workspace</div>
         <button className="btn btn-blue">Launch Whiteboard</button>
@@ -20322,14 +20184,14 @@ function VideoConferencingPage() {
   return (
     <div className="fade-in">
       <div className="page-header">
-        <div className="page-title">📹 Video Conferencing</div>
+        <div className="page-title">  Video Conferencing</div>
         <div className="page-sub">HD video meetings and collaboration</div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16 }}>
         {meetings.map((m) => (
           <div key={m.id} className="card" style={{ padding: 16, border: "1px solid #e2e8f0" }}>
             <div style={{ fontWeight: 700, marginBottom: 8 }}>{m.title}</div>
-            <div style={{ fontSize: ".9em", color: "#64748b", marginBottom: 12 }}>👥 {m.participants} participants • 🕐 {m.time}</div>
+            <div style={{ fontSize: ".9em", color: "#64748b", marginBottom: 12 }}>  {m.participants} participants     {m.time}</div>
             <button className="btn btn-blue" style={{ width: "100%" }}>
               {m.status === "Active" ? "Join Meeting" : "Schedule Meeting"}
             </button>
@@ -20350,7 +20212,7 @@ function LearningAnalyticsPage() {
   return (
     <div className="fade-in">
       <div className="page-header">
-        <div className="page-title">📊 Learning Analytics</div>
+        <div className="page-title">  Learning Analytics</div>
         <div className="page-sub">Advanced insights into learning patterns and performance</div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 16, marginBottom: 24 }}>
@@ -20383,7 +20245,7 @@ function GamificationPage() {
   return (
     <div className="fade-in">
       <div className="page-header">
-        <div className="page-title">🏆 Gamification</div>
+        <div className="page-title">  Gamification</div>
         <div className="page-sub">Earn badges, points, and achievements</div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16 }}>
@@ -20391,7 +20253,7 @@ function GamificationPage() {
           <div key={a.id} className="card" style={{ padding: 16, border: "1px solid #e2e8f0", opacity: a.unlocked ? 1 : 0.6 }}>
             <div style={{ fontWeight: 700, marginBottom: 8 }}>{a.name}</div>
             <div style={{ fontSize: ".9em", color: "#64748b", marginBottom: 8 }}>{a.description}</div>
-            <div style={{ fontSize: "1.1em", fontWeight: 600, color: "#059669" }}>⭐ {a.points} points</div>
+            <div style={{ fontSize: "1.1em", fontWeight: 600, color: "#059669" }}>  {a.points} points</div>
           </div>
         ))}
       </div>
@@ -20403,11 +20265,11 @@ function AdaptiveLearningPage() {
   return (
     <div className="fade-in">
       <div className="page-header">
-        <div className="page-title">🎯 Adaptive Learning</div>
+        <div className="page-title">  Adaptive Learning</div>
         <div className="page-sub">Personalized learning paths based on performance</div>
       </div>
       <div className="card" style={{ padding: 24, textAlign: "center" }}>
-        <div style={{ fontSize: "4em", marginBottom: 16 }}>🎯</div>
+        <div style={{ fontSize: "4em", marginBottom: 16 }}> </div>
         <div style={{ fontSize: "1.2em", fontWeight: 700, marginBottom: 8 }}>Adaptive Learning Engine</div>
         <div style={{ color: "#64748b", marginBottom: 24 }}>AI-powered personalized learning recommendations</div>
         <button className="btn btn-blue">Start Adaptive Learning</button>
@@ -20424,15 +20286,15 @@ function CollaborativeProjectsPage() {
   return (
     <div className="fade-in">
       <div className="page-header">
-        <div className="page-title">🤝 Collaborative Projects</div>
+        <div className="page-title">  Collaborative Projects</div>
         <div className="page-sub">Team-based learning and project management</div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16 }}>
         {projects.map((p) => (
           <div key={p.id} className="card" style={{ padding: 16, border: "1px solid #e2e8f0" }}>
             <div style={{ fontWeight: 700, marginBottom: 8 }}>{p.name}</div>
-            <div style={{ fontSize: ".9em", color: "#64748b", marginBottom: 4 }}>👥 {p.team} members</div>
-            <div style={{ fontSize: ".9em", color: "#64748b", marginBottom: 12 }}>📅 Due: {p.deadline}</div>
+            <div style={{ fontSize: ".9em", color: "#64748b", marginBottom: 4 }}>  {p.team} members</div>
+            <div style={{ fontSize: ".9em", color: "#64748b", marginBottom: 12 }}>  Due: {p.deadline}</div>
             <button className="btn btn-blue" style={{ width: "100%" }}>Join Project</button>
           </div>
         ))}
@@ -20445,11 +20307,11 @@ function MobileLearningPage() {
   return (
     <div className="fade-in">
       <div className="page-header">
-        <div className="page-title">📱 Mobile Learning</div>
+        <div className="page-title">  Mobile Learning</div>
         <div className="page-sub">Learn anywhere with mobile-optimized content</div>
       </div>
       <div className="card" style={{ padding: 24, textAlign: "center" }}>
-        <div style={{ fontSize: "4em", marginBottom: 16 }}>📱</div>
+        <div style={{ fontSize: "4em", marginBottom: 16 }}> </div>
         <div style={{ fontSize: "1.2em", fontWeight: 700, marginBottom: 8 }}>Mobile Learning Platform</div>
         <div style={{ color: "#64748b", marginBottom: 24 }}>Access courses, quizzes, and resources on any device</div>
         <button className="btn btn-blue">Download Mobile App</button>
@@ -20462,11 +20324,11 @@ function AITutorPage() {
   return (
     <div className="fade-in">
       <div className="page-header">
-        <div className="page-title">🤖 AI Tutor</div>
+        <div className="page-title">  AI Tutor</div>
         <div className="page-sub">24/7 intelligent tutoring and support</div>
       </div>
       <div className="card" style={{ padding: 24, textAlign: "center" }}>
-        <div style={{ fontSize: "4em", marginBottom: 16 }}>🤖</div>
+        <div style={{ fontSize: "4em", marginBottom: 16 }}> </div>
         <div style={{ fontSize: "1.2em", fontWeight: 700, marginBottom: 8 }}>AI-Powered Tutor</div>
         <div style={{ color: "#64748b", marginBottom: 24 }}>Get instant help with homework, explanations, and personalized guidance</div>
         <button className="btn btn-blue">Start AI Tutoring</button>
@@ -20476,1368 +20338,7 @@ function AITutorPage() {
 }
 
 // STUDY CONTENT PAGE (Admin)
-function StudyContentPage({ currentUser }) {
-  const [content, setContent] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
-  const [importing, setImporting] = useState(false);
-  const [editingContent, setEditingContent] = useState(null);
-  const [showQuestionsModal, setShowQuestionsModal] = useState(false);
-  const [selectedContent, setSelectedContent] = useState(null);
-  const [contentForm, setContentForm] = useState({
-    title: '',
-    description: '',
-    content_type: 'lesson',
-    education_level: 'jhs',
-    resource_kind: 'lesson_notes',
-    subject: '',
-    class_level: '',
-    content: '',
-    tags: [],
-    chapters: [],
-    difficulty_level: 'intermediate',
-    estimated_read_time: 15,
-    is_published: false
-  });
-  const [questions, setQuestions] = useState([]);
-  const [questionForm, setQuestionForm] = useState({
-    question_text: '',
-    question_type: 'multiple_choice',
-    chapter_index: 0,
-    points: 1,
-    correct_answer: '',
-    explanation: '',
-    answers: [{ answer_text: '', is_correct: false }, { answer_text: '', is_correct: false }]
-  });
-  const [activity, setActivity] = useState([]);
-  const [quizAttempts, setQuizAttempts] = useState([]);
-  const [questionMap, setQuestionMap] = useState({});
-  const [studentProfiles, setStudentProfiles] = useState({});
-  const [activityLoading, setActivityLoading] = useState(true);
-  const [exportingContentId, setExportingContentId] = useState(null);
-  const [mappedLiveTests, setMappedLiveTests] = useState(new Map());
-  const [originMappingAvailable, setOriginMappingAvailable] = useState(true);
-
-  useEffect(() => {
-    loadContent();
-    loadActivity();
-  }, []);
-
-  const loadMappedLiveTests = async () => {
-    if (!supabase) {
-      setMappedLiveTests(new Map());
-      return;
-    }
-
-    try {
-      const { data, error } = await supabase
-        .from('live_tests')
-        .select('id, title, origin_content_id')
-        .not('origin_content_id', 'is', null);
-
-      if (error) {
-        if (error.message?.includes('origin_content_id')) {
-          setOriginMappingAvailable(false);
-          setMappedLiveTests(new Map());
-          return;
-        }
-        throw error;
-      }
-
-      const map = new Map();
-      data?.forEach((test) => {
-        if (test.origin_content_id) {
-          map.set(test.origin_content_id, test);
-        }
-      });
-      setMappedLiveTests(map);
-    } catch (error) {
-      console.error('Error loading mapped live tests:', error);
-      setMappedLiveTests(new Map());
-      setOriginMappingAvailable(false);
-    }
-  };
-
-  const deriveTestTypeFromStudyQuestions = (questions) => {
-    if (!questions || questions.length === 0) return 'mixed';
-    const normalized = questions.map((question) => {
-      if (question.question_type === 'essay') return 'long_text';
-      return question.question_type;
-    });
-    const uniqueTypes = Array.from(new Set(normalized));
-    if (uniqueTypes.length === 1) return uniqueTypes[0];
-    return 'mixed';
-  };
-
-  const handleExportStudyContentToLiveTest = async (contentItem) => {
-    if (!supabase || !contentItem) return;
-    if (exportingContentId) return;
-
-    const existingTest = mappedLiveTests.get(contentItem.id);
-    if (originMappingAvailable && existingTest) {
-      alert(`This study content is already mapped to a live test:\n${existingTest.title}`);
-      return;
-    }
-
-    setExportingContentId(contentItem.id);
-
-    try {
-      const { data: studyQuestions, error: questionsError } = await supabase
-        .from('study_questions')
-        .select(`*, study_answers (*)`)
-        .eq('content_id', contentItem.id)
-        .order('order_index');
-
-      if (questionsError) throw questionsError;
-
-      const questionsToCopy = studyQuestions || [];
-      const testType = deriveTestTypeFromStudyQuestions(questionsToCopy);
-      const durationMinutes = Math.max(10, contentItem.estimated_read_time || 30);
-
-      const liveTestPayload = {
-        title: `Live Test: ${contentItem.title}`,
-        description: contentItem.description || `Quiz from study content: ${contentItem.title}`,
-        subject: contentItem.subject || '',
-        class: contentItem.class_level || '',
-        test_type: testType,
-        duration_minutes: durationMinutes,
-        total_questions: questionsToCopy.length,
-        is_active: true,
-        created_by: currentUser?.id
-      };
-
-      if (originMappingAvailable) {
-        liveTestPayload.origin_content_id = contentItem.id;
-      }
-
-      const { data: createdTest, error: createTestError } = await supabase
-        .from('live_tests')
-        .insert([liveTestPayload])
-        .select()
-        .single();
-
-      if (createTestError) throw createTestError;
-
-      if (questionsToCopy.length > 0) {
-        const questionInserts = questionsToCopy.map((question, index) => ({
-          test_id: createdTest.id,
-          question_text: question.question_text,
-          question_type: question.question_type === 'essay' ? 'long_text' : question.question_type,
-          points: question.points,
-          correct_answer: question.correct_answer,
-          explanation: question.explanation,
-          order_index: index
-        }));
-
-        const { data: createdQuestions, error: createQuestionsError } = await supabase
-          .from('test_questions')
-          .insert(questionInserts)
-          .select();
-
-        if (createQuestionsError) throw createQuestionsError;
-
-        const answersToInsert = [];
-        createdQuestions?.forEach((createdQuestion, index) => {
-          const sourceQuestion = questionsToCopy[index];
-          if (sourceQuestion.question_type === 'multiple_choice') {
-            sourceQuestion.study_answers?.forEach((answer) => {
-              answersToInsert.push({
-                question_id: createdQuestion.id,
-                answer_text: answer.answer_text,
-                is_correct: answer.is_correct,
-                order_index: answer.order_index
-              });
-            });
-          }
-        });
-
-        if (answersToInsert.length > 0) {
-          const { error: createAnswersError } = await supabase
-            .from('test_answers')
-            .insert(answersToInsert);
-          if (createAnswersError) throw createAnswersError;
-        }
-      }
-
-      if (originMappingAvailable) {
-        const newMap = new Map(mappedLiveTests);
-        newMap.set(contentItem.id, createdTest);
-        setMappedLiveTests(newMap);
-      }
-
-      alert(`Live test created from "${contentItem.title}" successfully.`);
-    } catch (error) {
-      console.error('Error exporting study content to live test:', error);
-      alert(`Failed to create live test: ${error?.message || error}`);
-    } finally {
-      setExportingContentId(null);
-    }
-  };
-
-  const loadContent = async () => {
-    if (!supabase) {
-      setContent([]);
-      setLoading(false);
-      return;
-    }
-
-    try {
-      const { data, error } = await supabase
-        .from('study_content')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setContent(data || []);
-      await loadMappedLiveTests();
-    } catch (error) {
-      console.error('Error loading content:', error);
-      setContent([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleCreateContent = async () => {
-    if (!supabase || !contentForm.title.trim()) return;
-
-    try {
-      const { data, error } = await supabase
-        .from('study_content')
-        .insert([{
-          ...contentForm,
-          created_by: currentUser?.id
-        }])
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      setContent([data, ...content]);
-      setShowCreateModal(false);
-      resetContentForm();
-    } catch (error) {
-      console.error('Error creating content:', error);
-      alert(`Failed to create content: ${error.message}`);
-    }
-  };
-
-  const handleImportContent = async (file) => {
-    if (!supabase || !file) return;
-
-    setImporting(true);
-    try {
-      const text = await file.text();
-      const importedData = JSON.parse(text);
-
-      // Validate the imported data structure
-      if (!Array.isArray(importedData)) {
-        throw new Error('Import data must be an array of content items');
-      }
-
-      const validItems = [];
-      const errors = [];
-
-      for (const item of importedData) {
-        if (!item.title || typeof item.title !== 'string') {
-          errors.push(`Invalid title for item: ${JSON.stringify(item)}`);
-          continue;
-        }
-
-        const contentItem = {
-          title: item.title,
-          description: item.description || '',
-          content_type: item.content_type || 'lesson',
-          education_level: item.education_level || 'all',
-          resource_kind: item.resource_kind || 'lesson_notes',
-          subject: item.subject || '',
-          class_level: item.class_level || '',
-          content: item.content || '',
-          tags: Array.isArray(item.tags) ? item.tags : [],
-          chapters: Array.isArray(item.chapters) ? item.chapters : [],
-          difficulty_level: item.difficulty_level || 'intermediate',
-          estimated_read_time: item.estimated_read_time || 15,
-          is_published: item.is_published || false,
-          created_by: currentUser?.id
-        };
-
-        validItems.push(contentItem);
-      }
-
-      if (validItems.length === 0) {
-        throw new Error('No valid content items found to import');
-      }
-
-      // Insert the content items
-      const { data, error } = await supabase
-        .from('study_content')
-        .insert(validItems)
-        .select();
-
-      if (error) throw error;
-
-      // Import questions if they exist
-      for (let i = 0; i < importedData.length; i++) {
-        const importedItem = importedData[i];
-        const createdItem = data[i];
-
-        if (importedItem.questions && Array.isArray(importedItem.questions)) {
-          const questionsToInsert = importedItem.questions.map((q, qIndex) => ({
-            content_id: createdItem.id,
-            question_text: q.question_text,
-            question_type: q.question_type || 'multiple_choice',
-            chapter_index: typeof q.chapter_index === 'number' ? q.chapter_index : 0,
-            points: q.points || 1,
-            correct_answer: q.correct_answer || '',
-            explanation: q.explanation || '',
-            order_index: qIndex
-          }));
-
-          if (questionsToInsert.length > 0) {
-            const { data: createdQuestions, error: questionsError } = await supabase
-              .from('study_questions')
-              .insert(questionsToInsert)
-              .select();
-
-            if (questionsError) {
-              console.error('Error importing questions for content:', createdItem.title, questionsError);
-              continue;
-            }
-
-            // Import answers for multiple choice questions
-            for (let qIndex = 0; qIndex < importedItem.questions.length; qIndex++) {
-              const importedQuestion = importedItem.questions[qIndex];
-              const createdQuestion = createdQuestions[qIndex];
-
-              if (importedQuestion.answers && Array.isArray(importedQuestion.answers) && importedQuestion.question_type === 'multiple_choice') {
-                const answersToInsert = importedQuestion.answers.map((a, aIndex) => ({
-                  question_id: createdQuestion.id,
-                  answer_text: a.answer_text,
-                  is_correct: a.is_correct || false,
-                  order_index: aIndex
-                }));
-
-                if (answersToInsert.length > 0) {
-                  const { error: answersError } = await supabase
-                    .from('study_answers')
-                    .insert(answersToInsert);
-
-                  if (answersError) {
-                    console.error('Error importing answers for question:', createdQuestion.question_text, answersError);
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-
-      setContent([...data, ...content]);
-      setShowImportModal(false);
-
-      alert(`Successfully imported ${validItems.length} content items${errors.length > 0 ? `. ${errors.length} items had errors and were skipped.` : ''}`);
-
-      if (errors.length > 0) {
-        console.warn('Import errors:', errors);
-      }
-
-    } catch (error) {
-      console.error('Error importing content:', error);
-      alert(`Failed to import content: ${error.message}`);
-    } finally {
-      setImporting(false);
-    }
-  };
-
-  const handleUpdateContent = async () => {
-    if (!supabase || !editingContent || !contentForm.title.trim()) return;
-
-    try {
-      const { data, error } = await supabase
-        .from('study_content')
-        .update(contentForm)
-        .eq('id', editingContent.id)
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      setContent(content.map(item => item.id === editingContent.id ? data : item));
-      setEditingContent(null);
-      setShowCreateModal(false);
-      resetContentForm();
-    } catch (error) {
-      console.error('Error updating content:', error);
-      alert(`Failed to update content: ${error.message}`);
-    }
-  };
-
-  const handleDeleteContent = async (contentId) => {
-    if (!supabase || !confirm('Are you sure you want to delete this content?')) return;
-
-    try {
-      const { error } = await supabase
-        .from('study_content')
-        .delete()
-        .eq('id', contentId);
-
-      if (error) throw error;
-
-      setContent(content.filter(item => item.id !== contentId));
-    } catch (error) {
-      console.error('Error deleting content:', error);
-      alert(`Failed to delete content: ${error.message}`);
-    }
-  };
-
-  const handleTogglePublish = async (contentId, isPublished) => {
-    if (!supabase) return;
-
-    try {
-      const { error } = await supabase
-        .from('study_content')
-        .update({ is_published: isPublished })
-        .eq('id', contentId);
-
-      if (error) throw error;
-
-      setContent(content.map(item =>
-        item.id === contentId ? { ...item, is_published: isPublished } : item
-      ));
-    } catch (error) {
-      console.error('Error updating publish status:', error);
-      alert(`Failed to update publish status: ${error.message}`);
-    }
-  };
-
-  const resetContentForm = () => {
-    setContentForm({
-      title: '',
-      description: '',
-      content_type: 'lesson',
-      education_level: 'jhs',
-      resource_kind: 'lesson_notes',
-      subject: '',
-      class_level: '',
-      content: '',
-      tags: [],
-      chapters: [],
-      difficulty_level: 'intermediate',
-      estimated_read_time: 15,
-      is_published: false
-    });
-  };
-
-  const loadQuestions = async (contentId) => {
-    if (!supabase) return;
-
-    try {
-      const { data, error } = await supabase
-        .from('study_questions')
-        .select(`
-          *,
-          study_answers (*)
-        `)
-        .eq('content_id', contentId)
-        .order('chapter_index', { ascending: true })
-        .order('order_index', { ascending: true });
-
-      if (error) throw error;
-      setQuestions(data || []);
-    } catch (error) {
-      console.error('Error loading questions:', error);
-      setQuestions([]);
-    }
-  };
-
-  const handleAddQuestion = async () => {
-    if (!supabase || !selectedContent || !questionForm.question_text.trim()) return;
-
-    try {
-      // Insert question
-      const questionPayload = {
-        content_id: selectedContent.id,
-        question_text: questionForm.question_text,
-        question_type: questionForm.question_type,
-        points: questionForm.points,
-        correct_answer: questionForm.correct_answer,
-        explanation: questionForm.explanation,
-        order_index: questions.length
-      };
-
-      if (typeof questionForm.chapter_index === 'number') {
-        questionPayload.chapter_index = questionForm.chapter_index;
-      }
-
-      const { data: questionData, error: questionError } = await supabase
-        .from('study_questions')
-        .insert([questionPayload])
-        .select()
-        .single();
-
-      if (questionError) throw questionError;
-
-      // Insert answers for multiple choice
-      if (questionForm.question_type === 'multiple_choice') {
-        const answersToInsert = questionForm.answers
-          .filter(answer => answer.answer_text.trim())
-          .map((answer, index) => ({
-            question_id: questionData.id,
-            answer_text: answer.answer_text,
-            is_correct: answer.is_correct,
-            order_index: index
-          }));
-
-        if (answersToInsert.length > 0) {
-          const { error: answersError } = await supabase
-            .from('study_answers')
-            .insert(answersToInsert);
-
-          if (answersError) throw answersError;
-        }
-      }
-
-      // Reload questions
-      await loadQuestions(selectedContent.id);
-      resetQuestionForm();
-    } catch (error) {
-      console.error('Error adding question:', error);
-      alert(`Failed to add question: ${error.message}`);
-    }
-  };
-
-  const resetQuestionForm = () => {
-    setQuestionForm({
-      question_text: '',
-      question_type: 'multiple_choice',
-      chapter_index: 0,
-      points: 1,
-      correct_answer: '',
-      explanation: '',
-      answers: [{ answer_text: '', is_correct: false }, { answer_text: '', is_correct: false }]
-    });
-  };
-
-  const openEditModal = (item) => {
-    setEditingContent(item);
-    setContentForm({
-      title: item.title,
-      description: item.description || '',
-      content_type: item.content_type,
-      education_level: item.education_level || 'all',
-      resource_kind: item.resource_kind || 'lesson_notes',
-      subject: item.subject || '',
-      class_level: item.class_level || '',
-      content: item.content || '',
-      tags: item.tags || [],
-      chapters: item.chapters || [],
-      difficulty_level: item.difficulty_level,
-      estimated_read_time: item.estimated_read_time || 15,
-      is_published: item.is_published
-    });
-    setShowCreateModal(true);
-  };
-
-  const openQuestionsModal = async (item) => {
-    setSelectedContent(item);
-    await loadQuestions(item.id);
-    setShowQuestionsModal(true);
-  };
-
-  const loadActivity = async () => {
-    if (!supabase) {
-      setActivity([]);
-      setQuizAttempts([]);
-      setQuestionMap({});
-      setStudentProfiles({});
-      setActivityLoading(false);
-      return;
-    }
-
-    try {
-      const [progressResp, attemptsResp] = await Promise.all([
-        supabase
-          .from('student_study_progress')
-          .select('*')
-          .order('last_accessed_at', { ascending: false }),
-        supabase
-          .from('student_question_attempts')
-          .select('*')
-          .order('created_at', { ascending: false })
-          .limit(50),
-      ]);
-
-      if (progressResp.error) throw progressResp.error;
-      if (attemptsResp.error) throw attemptsResp.error;
-
-      const progressRecords = progressResp.data || [];
-      const attemptRows = attemptsResp.data || [];
-      const studentIds = Array.from(
-        new Set(progressRecords.map((record) => record.student_id).concat(attemptRows.map((record) => record.student_id)).filter(Boolean))
-      );
-      const profilesMap = {};
-
-      if (profilesTableAvailable && studentIds.length > 0) {
-        const { data: profileRows, error: profileError } = await supabase
-          .from('profiles')
-          .select('id, full_name, email, role')
-          .in('id', studentIds);
-
-        if (profileError) {
-          if (isProfilesTableMissingError(profileError)) {
-            profilesTableAvailable = false;
-          } else {
-            throw profileError;
-          }
-        } else {
-          profileRows?.forEach((profile) => {
-            profilesMap[profile.id] = profile;
-          });
-        }
-      }
-
-      const questionIds = Array.from(
-        new Set(attemptRows.map((record) => record.question_id).filter(Boolean))
-      );
-      const questionsMap = {};
-
-      if (questionIds.length > 0) {
-        const { data: questionRows, error: questionError } = await supabase
-          .from('study_questions')
-          .select('id, content_id, question_text')
-          .in('id', questionIds);
-
-        if (questionError) throw questionError;
-        questionRows?.forEach((question) => {
-          questionsMap[question.id] = question;
-        });
-      }
-
-      setActivity(progressRecords);
-      setQuizAttempts(attemptRows);
-      setQuestionMap(questionsMap);
-      setStudentProfiles(profilesMap);
-    } catch (error) {
-      console.error('Error loading lesson activity:', error);
-      setActivity([]);
-      setQuizAttempts([]);
-      setQuestionMap({});
-      setStudentProfiles({});
-    } finally {
-      setActivityLoading(false);
-    }
-  };
-
-  const getStudentName = (studentId) => {
-    const profile = studentProfiles[studentId];
-    return profile?.full_name || profile?.email || studentId || 'Unknown student';
-  };
-
-  const contentActivityMap = useMemo(() => {
-    const map = new Map();
-    activity.forEach((record) => {
-      const items = map.get(record.content_id) || [];
-      items.push(record);
-      map.set(record.content_id, items);
-    });
-    return map;
-  }, [activity]);
-
-  const quizContentActivityMap = useMemo(() => {
-    const map = new Map();
-    quizAttempts.forEach((attempt) => {
-      const question = questionMap[attempt.question_id];
-      if (!question?.content_id) return;
-      const items = map.get(question.content_id) || [];
-      items.push({ ...attempt, question });
-      map.set(question.content_id, items);
-    });
-    return map;
-  }, [quizAttempts, questionMap]);
-
-  const recentActivity = useMemo(() => activity.slice(0, 8), [activity]);
-  const recentQuizActivity = useMemo(() => quizAttempts.slice(0, 8), [quizAttempts]);
-
-  const totalActiveStudents = useMemo(
-    () => new Set(activity.map((record) => record.student_id).filter(Boolean)).size,
-    [activity],
-  );
-
-  const totalQuizStudents = useMemo(
-    () => new Set(quizAttempts.map((record) => record.student_id).filter(Boolean)).size,
-    [quizAttempts],
-  );
-
-  if (loading) {
-    return (
-      <div className="fade-in">
-        <div className="page-header">
-          <div className="page-title">Learning Library</div>
-          <div className="page-sub">Loading BECE, WASSCE, and university resources...</div>
-        </div>
-        <div style={{ textAlign: 'center', padding: '40px' }}>
-          <div className="spinner"></div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="fade-in study-content-page">
-      <div className="page-header">
-        <div className="page-title">Learning Library</div>
-        <div className="page-sub">Publish BECE preparation, WASSCE core and elective lessons, and university course resources.</div>
-      </div>
-
-      <div className="page-actions-row">
-        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-          <button
-            className="btn btn-blue"
-            onClick={() => setShowCreateModal(true)}
-          >
-            + Add Content
-          </button>
-          <button
-            className="btn btn-outline"
-            onClick={() => setShowImportModal(true)}
-          >
-            📁 Import Content
-          </button>
-        </div>
-      </div>
-
-      <div className="activity-panel">
-        <div className="activity-header">
-          <div>
-            <h3>Student Lesson Activity</h3>
-            <p style={{ margin: 0, color: '#64748b' }}>
-              Track which lessons students are taking, who accessed them, and how far they progressed.
-            </p>
-          </div>
-        </div>
-
-        <div className="activity-summary-grid">
-          <div className="activity-summary-card">
-            <div className="summary-label">Lessons Published</div>
-            <div className="summary-value">{content.length}</div>
-          </div>
-          <div className="activity-summary-card">
-            <div className="summary-label">Progress Records</div>
-            <div className="summary-value">{activity.length}</div>
-          </div>
-          <div className="activity-summary-card">
-            <div className="summary-label">Quiz Attempts</div>
-            <div className="summary-value">{quizAttempts.length}</div>
-          </div>
-          <div className="activity-summary-card">
-            <div className="summary-label">Students in Quizzes</div>
-            <div className="summary-value">{totalQuizStudents}</div>
-          </div>
-          <div className="activity-summary-card">
-            <div className="summary-label">Mapped Live Tests</div>
-            <div className="summary-value">{mappedLiveTests.size}</div>
-          </div>
-        </div>
-
-        {activityLoading ? (
-          <div style={{ textAlign: 'center', padding: 24 }}>
-            <div className="spinner"></div>
-          </div>
-        ) : activity.length === 0 ? (
-          <div className="empty-state" style={{ padding: '24px 12px' }}>
-            No student lesson activity yet. Students will appear here as they begin lessons.
-          </div>
-        ) : (
-          <div className="activity-table-wrap">
-            <table className="activity-table">
-              <thead>
-                <tr>
-                  <th>Lesson</th>
-                  <th>Student</th>
-                  <th>Progress</th>
-                  <th>Last accessed</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentActivity.map((record) => (
-                  <tr key={`${record.student_id}-${record.content_id}-${record.last_accessed_at}`}>
-                    <td>{content.find((item) => item.id === record.content_id)?.title || 'Unknown lesson'}</td>
-                    <td>{getStudentName(record.student_id)}</td>
-                    <td>{`${record.progress_percentage || 0}%`}</td>
-                    <td>{record.last_accessed_at ? new Date(record.last_accessed_at).toLocaleString() : 'Unknown'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-        <div className="activity-table-card" style={{ marginTop: 20 }}>
-          <div style={{ marginBottom: 12, fontWeight: 600 }}>Recent Quiz Attempts</div>
-          {activityLoading ? (
-            <div style={{ textAlign: 'center', padding: 24 }}>
-              <div className="spinner"></div>
-            </div>
-          ) : quizAttempts.length === 0 ? (
-            <div className="empty-state" style={{ padding: '24px 12px' }}>
-              No quiz attempts yet. Students will appear here as they start a quiz.
-            </div>
-          ) : (
-            <div className="activity-table-wrap">
-              <table className="activity-table">
-                <thead>
-                  <tr>
-                    <th>Lesson</th>
-                    <th>Student</th>
-                    <th>Question</th>
-                    <th>Correct</th>
-                    <th>Points</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentQuizActivity.map((attempt) => (
-                    <tr key={`${attempt.student_id}-${attempt.question_id}-${attempt.id}`}>
-                      <td>{content.find((item) => item.id === questionMap[attempt.question_id]?.content_id)?.title || 'Unknown lesson'}</td>
-                      <td>{getStudentName(attempt.student_id)}</td>
-                      <td>{questionMap[attempt.question_id]?.question_text || 'Unknown question'}</td>
-                      <td>{attempt.is_correct ? 'Yes' : 'No'}</td>
-                      <td>{attempt.points_earned ?? 0}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
-      <div className="tests-grid">
-        {content.map((item) => {
-          const itemActivity = contentActivityMap.get(item.id) || [];
-          const itemQuizActivity = quizContentActivityMap.get(item.id) || [];
-          const topStudents = itemActivity
-            .slice(0, 3)
-            .map((record) => getStudentName(record.student_id));
-
-          return (
-            <div key={item.id} className="test-card">
-              <div className="test-header">
-                <div className="test-title">{item.title}</div>
-                <div className="test-status" style={{
-                  background: item.is_published ? '#dcfce7' : '#fef3c7',
-                  color: item.is_published ? '#166534' : '#92400e'
-                }}>
-                  {item.is_published ? 'Published' : 'Draft'}
-                </div>
-              </div>
-              <div className="test-meta">
-                <div className="test-subject">{getLearningResourceLabel(item.resource_kind)}</div>
-                <div className="test-subject">{item.education_level === "all" ? "All learning levels" : getLearningLevelName(item.education_level)}</div>
-                <div className="test-subject">Format: {item.content_type}</div>
-                {item.subject && <div className="test-subject">Subject: {item.subject}</div>}
-                {item.class_level && <div className="test-class">{item.education_level === "university" ? "Course:" : "Class:"} {item.class_level}</div>}
-                {item.chapters?.length > 0 && <div className="test-subject">Chapters: {item.chapters.length}</div>}
-                <div className="test-duration">Read time: {item.estimated_read_time} min</div>
-              </div>
-              <div className="test-description">{item.description}</div>
-              {(itemActivity.length > 0 || itemQuizActivity.length > 0) && (
-                <div className="lesson-activity-summary">
-                  <div>{itemActivity.length} lesson view{itemActivity.length !== 1 ? 's' : ''}</div>
-                  {itemQuizActivity.length > 0 && (
-                    <div>{itemQuizActivity.length} quiz attempt{itemQuizActivity.length !== 1 ? 's' : ''}</div>
-                  )}
-                  {topStudents.length > 0 && (
-                    <div style={{ marginTop: 6, color: '#475569', fontSize: '0.9rem' }}>
-                      {topStudents.join(', ')}{itemActivity.length > 3 ? ` +${itemActivity.length - 3} more` : ''}
-                    </div>
-                  )}
-                </div>
-              )}
-              <div className="test-actions">
-                <button
-                  className="btn btn-sm"
-                  onClick={() => handleExportStudyContentToLiveTest(item)}
-                  disabled={exportingContentId === item.id}
-                  style={{ backgroundColor: exportingContentId === item.id ? '#94a3b8' : '#7c3aed', color: '#fff' }}
-                >
-                  {exportingContentId === item.id ? 'Exporting...' : 'Export to Live Test'}
-                </button>
-                <button
-                  className="btn btn-sm"
-                  onClick={() => openEditModal(item)}
-                >
-                  Edit
-                </button>
-                <button
-                  className="btn btn-sm"
-                  onClick={() => openQuestionsModal(item)}
-                >
-                  Questions ({questions.filter(q => q.content_id === item.id).length})
-                </button>
-                <button
-                  className={`btn btn-sm ${item.is_published ? 'btn-danger' : 'btn-success'}`}
-                  onClick={() => handleTogglePublish(item.id, !item.is_published)}
-                >
-                  {item.is_published ? 'Unpublish' : 'Publish'}
-                </button>
-                <button
-                  className="btn btn-sm btn-danger"
-                  onClick={() => handleDeleteContent(item.id)}
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {content.length === 0 && (
-        <div className="empty-state">
-          <div className="empty-title">No learning materials yet</div>
-          <div className="empty-subtitle">Publish BECE, WASSCE, or university resources from the Learning Library editor.</div>
-        </div>
-      )}
-
-      {/* Create/Edit Content Modal */}
-      {showCreateModal && (
-        <div className="modal-overlay" onClick={() => { setShowCreateModal(false); setEditingContent(null); resetContentForm(); }}>
-          <div className="modal-content large-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>{editingContent ? 'Edit Content' : 'Create New Content'}</h3>
-              <button className="modal-close" onClick={() => { setShowCreateModal(false); setEditingContent(null); resetContentForm(); }}>×</button>
-            </div>
-            <div className="modal-body">
-              <div className="form-group">
-                <label>Title *</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={contentForm.title}
-                  onChange={(e) => setContentForm({...contentForm, title: e.target.value})}
-                  placeholder="Enter content title"
-                />
-              </div>
-              <div className="form-group">
-                <label>Description</label>
-                <textarea
-                  className="form-input"
-                  value={contentForm.description}
-                  onChange={(e) => setContentForm({...contentForm, description: e.target.value})}
-                  placeholder="Brief description of the content"
-                  rows={3}
-                />
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Learning audience</label>
-                  <select
-                    className="form-input"
-                    value={contentForm.education_level}
-                    onChange={(e) => setContentForm({ ...contentForm, education_level: e.target.value })}
-                  >
-                    {LEARNING_LEVELS.map((level) => (
-                      <option key={level.key} value={level.key}>
-                        {level.label}
-                      </option>
-                    ))}
-                    <option value="all">All learning levels</option>
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label>Material focus</label>
-                  <select
-                    className="form-input"
-                    value={contentForm.resource_kind}
-                    onChange={(e) => setContentForm({ ...contentForm, resource_kind: e.target.value })}
-                  >
-                    {LEARNING_RESOURCE_TYPES.map((resourceType) => (
-                      <option key={resourceType.key} value={resourceType.key}>
-                        {resourceType.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Content Type</label>
-                  <select
-                    className="form-input"
-                    value={contentForm.content_type}
-                    onChange={(e) => setContentForm({...contentForm, content_type: e.target.value})}
-                  >
-                    <option value="lesson">Lesson</option>
-                    <option value="article">Article</option>
-                    <option value="video">Video</option>
-                    <option value="document">Document</option>
-                    <option value="interactive">Interactive</option>
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label>Difficulty Level</label>
-                  <select
-                    className="form-input"
-                    value={contentForm.difficulty_level}
-                    onChange={(e) => setContentForm({...contentForm, difficulty_level: e.target.value})}
-                  >
-                    <option value="beginner">Beginner</option>
-                    <option value="intermediate">Intermediate</option>
-                    <option value="advanced">Advanced</option>
-                  </select>
-                </div>
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label>{contentForm.education_level === "university" ? "Course or subject" : "Subject"}</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    list={`learning-subjects-${contentForm.education_level}`}
-                    value={contentForm.subject}
-                    onChange={(e) => setContentForm({...contentForm, subject: e.target.value})}
-                    placeholder={contentForm.education_level === "university" ? "Search or enter a course" : "Search or enter a subject"}
-                  />
-                  <datalist id={`learning-subjects-${contentForm.education_level}`}>
-                    {(LEARNING_SUBJECTS[contentForm.education_level] || []).map((subject) => (
-                      <option key={subject} value={subject} />
-                    ))}
-                  </datalist>
-                </div>
-                <div className="form-group">
-                  <label>{contentForm.education_level === "university" ? "Course / paper code" : "Class level"}</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    value={contentForm.class_level}
-                    onChange={(e) => setContentForm({...contentForm, class_level: e.target.value})}
-                    placeholder={contentForm.education_level === "university" ? "e.g., CS 201" : contentForm.education_level === "shs" ? "e.g., SHS 2" : "e.g., JHS 3"}
-                  />
-                </div>
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Estimated Read Time (minutes)</label>
-                  <input
-                    type="number"
-                    className="form-input"
-                    value={contentForm.estimated_read_time}
-                    onChange={(e) => setContentForm({...contentForm, estimated_read_time: parseInt(e.target.value) || 15})}
-                    min={1}
-                  />
-                </div>
-                <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <label style={{ margin: 0 }}>Publish Content</label>
-                  <input
-                    type="checkbox"
-                    checked={contentForm.is_published}
-                    onChange={(e) => setContentForm({...contentForm, is_published: e.target.checked})}
-                  />
-                </div>
-              </div>
-
-              <div className="form-group">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                  <label style={{ margin: 0 }}>Chapters</label>
-                  <button
-                    type="button"
-                    className="btn btn-sm"
-                    onClick={() => setContentForm({
-                      ...contentForm,
-                      chapters: [...(contentForm.chapters || []), { title: '', content: '' }]
-                    })}
-                  >
-                    + Add Chapter
-                  </button>
-                </div>
-                {(contentForm.chapters || []).length === 0 ? (
-                  <div style={{ color: '#64748b', fontSize: '0.95rem', marginBottom: 10 }}>
-                    Add chapters for this content item to break it into sections.
-                  </div>
-                ) : null}
-                {(contentForm.chapters || []).map((chapter, index) => (
-                  <div key={index} style={{ border: '1px solid #e2e8f0', borderRadius: 12, padding: 14, marginBottom: 12 }}>
-                    <div className="form-row" style={{ alignItems: 'flex-start' }}>
-                      <div className="form-group" style={{ flex: 1 }}>
-                        <label>Chapter Title</label>
-                        <input
-                          type="text"
-                          className="form-input"
-                          value={chapter.title}
-                          onChange={(e) => {
-                            const chapters = [...(contentForm.chapters || [])];
-                            chapters[index] = { ...chapters[index], title: e.target.value };
-                            setContentForm({ ...contentForm, chapters });
-                          }}
-                          placeholder="Chapter title"
-                        />
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', marginTop: 24 }}>
-                        <button
-                          type="button"
-                          className="btn btn-danger"
-                          style={{ height: 36 }}
-                          onClick={() => {
-                            const chapters = (contentForm.chapters || []).filter((_, i) => i !== index);
-                            setContentForm({ ...contentForm, chapters });
-                          }}
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </div>
-                    <div className="form-group">
-                      <label>Chapter Content</label>
-                      <textarea
-                        className="form-input"
-                        value={chapter.content}
-                        onChange={(e) => {
-                          const chapters = [...(contentForm.chapters || [])];
-                          chapters[index] = { ...chapters[index], content: e.target.value };
-                          setContentForm({ ...contentForm, chapters });
-                        }}
-                        placeholder="Enter chapter content"
-                        rows={4}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="form-group">
-                <label>Content (HTML/Markdown)</label>
-                <textarea
-                  className="form-input"
-                  value={contentForm.content}
-                  onChange={(e) => setContentForm({...contentForm, content: e.target.value})}
-                  placeholder="Enter the main content here..."
-                  rows={10}
-                />
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button
-                className="btn btn-secondary"
-                onClick={() => { setShowCreateModal(false); setEditingContent(null); resetContentForm(); }}
-              >
-                Cancel
-              </button>
-              <button
-                className="btn btn-blue"
-                onClick={editingContent ? handleUpdateContent : handleCreateContent}
-              >
-                {editingContent ? 'Update Content' : 'Create Content'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Questions Modal */}
-      {showQuestionsModal && selectedContent && (
-        <div className="modal-overlay" onClick={() => { setShowQuestionsModal(false); setSelectedContent(null); setQuestions([]); }}>
-          <div className="modal-content large-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Questions for: {selectedContent.title}</h3>
-              <button className="modal-close" onClick={() => { setShowQuestionsModal(false); setSelectedContent(null); setQuestions([]); }}>×</button>
-            </div>
-            <div className="modal-body">
-              <div style={{ marginBottom: '20px' }}>
-                <h4>Add New Question</h4>
-                <div className="form-group">
-                  <label>Question Text *</label>
-                  <textarea
-                    className="form-input"
-                    value={questionForm.question_text}
-                    onChange={(e) => setQuestionForm({...questionForm, question_text: e.target.value})}
-                    placeholder="Enter the question"
-                    rows={3}
-                  />
-                </div>
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>Question Type</label>
-                    <select
-                      className="form-input"
-                      value={questionForm.question_type}
-                      onChange={(e) => setQuestionForm({...questionForm, question_type: e.target.value})}
-                    >
-                      <option value="multiple_choice">Multiple Choice</option>
-                      <option value="true_false">True/False</option>
-                      <option value="short_answer">Short Answer</option>
-                      <option value="essay">Essay</option>
-                    </select>
-                  </div>
-                  <div className="form-group">
-                    <label>Chapter</label>
-                    <input
-                      type="number"
-                      className="form-input"
-                      value={questionForm.chapter_index}
-                      onChange={(e) => setQuestionForm({...questionForm, chapter_index: parseInt(e.target.value) >= 0 ? parseInt(e.target.value) : 0})}
-                      min={0}
-                    />
-                    <small style={{ color: '#64748b' }}>Enter the chapter number for this question</small>
-                  </div>
-                  <div className="form-group">
-                    <label>Points</label>
-                    <input
-                      type="number"
-                      className="form-input"
-                      value={questionForm.points}
-                      onChange={(e) => setQuestionForm({...questionForm, points: parseInt(e.target.value) || 1})}
-                      min={1}
-                    />
-                  </div>
-                </div>
-
-                {questionForm.question_type === 'multiple_choice' && (
-                  <div className="form-group">
-                    <label>Answer Options</label>
-                    {questionForm.answers.map((answer, index) => (
-                      <div key={index} style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
-                        <input
-                          type="text"
-                          className="form-input"
-                          value={answer.answer_text}
-                          onChange={(e) => {
-                            const newAnswers = [...questionForm.answers];
-                            newAnswers[index].answer_text = e.target.value;
-                            setQuestionForm({...questionForm, answers: newAnswers});
-                          }}
-                          placeholder={`Option ${index + 1}`}
-                        />
-                        <input
-                          type="checkbox"
-                          checked={answer.is_correct}
-                          onChange={(e) => {
-                            const newAnswers = [...questionForm.answers];
-                            newAnswers[index].is_correct = e.target.checked;
-                            setQuestionForm({...questionForm, answers: newAnswers});
-                          }}
-                        />
-                        <label>Correct</label>
-                        {questionForm.answers.length > 2 && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const newAnswers = questionForm.answers.filter((_, i) => i !== index);
-                              setQuestionForm({...questionForm, answers: newAnswers});
-                            }}
-                          >
-                            Remove
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                    <button
-                      type="button"
-                      className="btn btn-sm"
-                      onClick={() => setQuestionForm({
-                        ...questionForm,
-                        answers: [...questionForm.answers, { answer_text: '', is_correct: false }]
-                      })}
-                    >
-                      + Add Option
-                    </button>
-                  </div>
-                )}
-
-                {questionForm.question_type === 'true_false' && (
-                  <div className="form-group">
-                    <label>Correct Answer</label>
-                    <select
-                      className="form-input"
-                      value={questionForm.correct_answer}
-                      onChange={(e) => setQuestionForm({...questionForm, correct_answer: e.target.value})}
-                    >
-                      <option value="">Select answer</option>
-                      <option value="true">True</option>
-                      <option value="false">False</option>
-                    </select>
-                  </div>
-                )}
-
-                {(questionForm.question_type === 'short_answer' || questionForm.question_type === 'essay') && (
-                  <div className="form-group">
-                    <label>Expected Answer</label>
-                    <textarea
-                      className="form-input"
-                      value={questionForm.correct_answer}
-                      onChange={(e) => setQuestionForm({...questionForm, correct_answer: e.target.value})}
-                      placeholder="Enter the expected answer or keywords"
-                      rows={2}
-                    />
-                  </div>
-                )}
-
-                <div className="form-group">
-                  <label>Explanation (Optional)</label>
-                  <textarea
-                    className="form-input"
-                    value={questionForm.explanation}
-                    onChange={(e) => setQuestionForm({...questionForm, explanation: e.target.value})}
-                    placeholder="Explain the correct answer"
-                    rows={2}
-                  />
-                </div>
-
-                <button
-                  className="btn btn-blue"
-                  onClick={handleAddQuestion}
-                  disabled={!questionForm.question_text.trim()}
-                >
-                  Add Question
-                </button>
-              </div>
-
-              <div>
-                <h4>Existing Questions ({questions.length})</h4>
-                {questions.length === 0 ? (
-                  <p>No questions added yet.</p>
-                ) : (
-                  <div className="questions-list">
-                    {questions.map((question, index) => (
-                      <div key={question.id} className="question-item">
-                        <div className="question-header">
-                          <div className="question-number">Q{index + 1}</div>
-                          <div className="question-text">{question.question_text}</div>
-                          <div className="question-meta">
-                            <span className="question-type">{question.question_type.replace('_', ' ')}</span>
-                            <span className="question-points">{question.points} pts</span>
-                            <span className="question-chapter">Chapter {question.chapter_index ?? 0}</span>
-                          </div>
-                        </div>
-                        {question.question_type === 'multiple_choice' && question.study_answers && (
-                          <div className="question-answers">
-                            {question.study_answers.map((answer) => (
-                              <div key={answer.id} className={`answer-option ${answer.is_correct ? 'correct' : ''}`}>
-                                <div className="answer-label">
-                                  <span className="answer-letter">{String.fromCharCode(65 + answer.order_index)}</span>
-                                  {answer.answer_text}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        {question.explanation && (
-                          <div className="question-explanation">
-                            <strong>Explanation:</strong> {question.explanation}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+const StudyContentPage = lazy(() => import("./src/components/AdminStudyContentPage.jsx"));
 
 // ADMIN NAV
 const ADMIN_NAV = [
@@ -21868,6 +20369,7 @@ const ADMIN_NAV = [
   { key: "fees", icon: "fees", label: "Fees", color: "#22c55e" },
   { section: "Communication" },
   { key: "study-teams", icon: "chat", label: "Study Teams", color: "#7c3aed" },
+  { key: "helpdesk", icon: "support", label: "Student Support", color: "#0f766e" },
   { key: "chat", icon: "chat", label: "Chat", color: "#10b981" },
   { key: "documents", icon: "docs", label: "Documents", color: "#7c2d12" },
   { section: "Administration" },
@@ -21895,6 +20397,21 @@ const dedupeNavEntries = (items) => {
     seen.add(entry.key);
     return true;
   });
+};
+
+const removeEmptyNavSections = (items) => {
+  const result = [];
+  let pendingSection = null;
+  items.forEach((item) => {
+    if (item.section) {
+      pendingSection = item;
+      return;
+    }
+    if (pendingSection) result.push(pendingSection);
+    pendingSection = null;
+    result.push(item);
+  });
+  return result;
 };
 
 const dedupeSubpageKeys = (keys) => {
@@ -21938,6 +20455,7 @@ const getPriorityBottomKeys = (priorityKeys, navItems, blockedKeys = new Set(), 
 
 const SCHOOL_ADMIN_EXCLUDED_KEYS = new Set([
   "super-admin-control",
+  "helpdesk",
   "settings",
   "registered-schools",
   "permissions",
@@ -22229,7 +20747,7 @@ function StudentStudyGroupsPage({ user, studentData }) {
     return (
       <div className="fade-in">
         <div className="page-header">
-          <div className="page-title">👥 Study Groups</div>
+          <div className="page-title">  Study Groups</div>
           <div className="page-sub">Loading study groups...</div>
         </div>
         <div style={{ textAlign: 'center', padding: '40px' }}>
@@ -22242,7 +20760,7 @@ function StudentStudyGroupsPage({ user, studentData }) {
   return (
     <div className="fade-in">
       <div className="page-header">
-        <div className="page-title">👥 Study Groups</div>
+        <div className="page-title">  Study Groups</div>
         <div className="page-sub">Collaborate with fellow students in study groups</div>
       </div>
 
@@ -22258,7 +20776,7 @@ function StudentStudyGroupsPage({ user, studentData }) {
             className="btn btn-outline"
             onClick={() => setShowJoinModal(true)}
           >
-            🔗 Join Private Group
+              Join Private Group
           </button>
         </div>
       </div>
@@ -22298,8 +20816,8 @@ function StudentStudyGroupsPage({ user, studentData }) {
                 </div>
 
                 <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', fontSize: '0.9em', color: '#64748b' }}>
-                  <span>📚 {group.subject || 'General'}</span>
-                  <span>👥 {group.class_level || 'All Levels'}</span>
+                  <span>  {group.subject || 'General'}</span>
+                  <span>  {group.class_level || 'All Levels'}</span>
                 </div>
 
                 <div style={{ display: 'flex', gap: '8px' }}>
@@ -22307,7 +20825,7 @@ function StudentStudyGroupsPage({ user, studentData }) {
                     className="btn btn-sm btn-blue"
                     onClick={() => openGroupChat(group)}
                   >
-                    💬 Chat
+                      Chat
                   </button>
                   <button
                     className="btn btn-sm btn-outline"
@@ -22352,9 +20870,9 @@ function StudentStudyGroupsPage({ user, studentData }) {
                   </div>
 
                   <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', fontSize: '0.9em', color: '#64748b' }}>
-                    <span>📚 {group.subject || 'General'}</span>
-                    <span>👥 {group.class_level || 'All Levels'}</span>
-                    <span>👤 {group.max_members} max</span>
+                    <span>  {group.subject || 'General'}</span>
+                    <span>  {group.class_level || 'All Levels'}</span>
+                    <span>  {group.max_members} max</span>
                   </div>
 
                   <div style={{ display: 'flex', gap: '8px' }}>
@@ -22363,14 +20881,14 @@ function StudentStudyGroupsPage({ user, studentData }) {
                         className="btn btn-sm btn-blue"
                         onClick={() => openGroupChat(group)}
                       >
-                        💬 Open Chat
+                          Open Chat
                       </button>
                     ) : (
                       <button
                         className="btn btn-sm btn-green"
                         onClick={() => joinGroup(group.id)}
                       >
-                        ➕ Join Group
+                          Join Group
                       </button>
                     )}
                   </div>
@@ -22387,7 +20905,7 @@ function StudentStudyGroupsPage({ user, studentData }) {
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Create Study Group</h3>
-              <button className="modal-close" onClick={() => setShowCreateModal(false)}>×</button>
+              <button className="modal-close" aria-label="Close dialog" onClick={() => setShowCreateModal(false)}>X</button>
             </div>
             <div className="modal-body">
               <div className="form-group">
@@ -22478,7 +20996,7 @@ function StudentStudyGroupsPage({ user, studentData }) {
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Join Private Group</h3>
-              <button className="modal-close" onClick={() => setShowJoinModal(false)}>×</button>
+              <button className="modal-close" aria-label="Close dialog" onClick={() => setShowJoinModal(false)}>X</button>
             </div>
             <div className="modal-body">
               <div className="form-group">
@@ -22520,7 +21038,7 @@ function StudentStudyGroupsPage({ user, studentData }) {
           <div className="modal-content large-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3>{selectedGroup.name} - Group Chat</h3>
-              <button className="modal-close" onClick={() => setShowGroupModal(false)}>×</button>
+              <button className="modal-close" aria-label="Close dialog" onClick={() => setShowGroupModal(false)}>X</button>
             </div>
             <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', height: '60vh' }}>
               <div style={{
@@ -22624,6 +21142,7 @@ const STUDENT_SUBPAGE_MAP = {
 // ADMIN PORTAL
 function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
   const { cfg: appCfg } = useContext(SettingsContext);
+  const { notify } = useContext(NotificationContext) || {};
   const adminFeesPortalEnabled = appCfg.adminFeesPortalEnabled !== false;
   const childToParent = useMemo(() => {
     const map = {};
@@ -22648,6 +21167,7 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
     () => typeof window !== "undefined" && window.innerWidth >= 768,
   );
   const [notificationCount, setNotificationCount] = useState(0);
+  const [adminSupportNotifications, setAdminSupportNotifications] = useState([]);
   const [adminStudents, setAdminStudents] = useState(() =>
     supabase ? [] : sortStudentsByIndex(STUDENTS_DATA),
   );
@@ -22701,15 +21221,102 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
       status: "online",
     },
   ]);
+  const unreadAdminSupportNotifications = adminSupportNotifications.filter(
+    (notification) => !notification.is_read,
+  ).length;
+  const markAdminSupportNotificationsRead = useCallback(async () => {
+    const unreadIds = adminSupportNotifications
+      .filter((notification) => !notification.is_read)
+      .map((notification) => notification.id);
+    if (!supabase || !unreadIds.length) return;
+    const { error } = await supabase
+      .from("admin_notifications")
+      .update({ is_read: true })
+      .in("id", unreadIds);
+    if (error) {
+      notify?.(`Could not mark support notifications as read: ${error.message}`, "error");
+      return;
+    }
+    setAdminSupportNotifications((current) =>
+      current.map((notification) =>
+        unreadIds.includes(notification.id)
+          ? { ...notification, is_read: true }
+          : notification,
+      ),
+    );
+  }, [adminSupportNotifications, notify]);
+
+  useEffect(() => {
+    if (!supabase) return undefined;
+    let active = true;
+    const loadNotifications = async () => {
+      const { data, error } = await supabase
+        .from("admin_notifications")
+        .select("id, notification_type, title, message, student_id, ticket_record_key, is_read, created_at")
+        .order("created_at", { ascending: false })
+        .limit(50);
+      if (!active) return;
+      if (error) {
+        notify?.(`Support notifications could not be loaded: ${error.message}`, "error");
+        return;
+      }
+      setAdminSupportNotifications(data || []);
+    };
+    void loadNotifications().catch((error) => {
+      if (active) {
+        notify?.(`Support notifications could not be loaded: ${error?.message || "Supabase request failed."}`, "error");
+      }
+    });
+
+    const channel = supabase
+      .channel(`admin-support-notifications-${user?.id || "current"}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "admin_notifications",
+        },
+        (payload) => {
+          const notification = payload.new;
+          setAdminSupportNotifications((current) =>
+            current.some((item) => item.id === notification.id)
+              ? current
+              : [notification, ...current].slice(0, 50),
+          );
+          notify?.(
+            `${notification.title}: ${notification.message}`,
+            "info",
+            8000,
+          );
+        },
+      )
+      .subscribe((status) => {
+        if (status === "CHANNEL_ERROR") {
+          notify?.("Live support ticket alerts are unavailable. Refresh to check for new tickets.", "error");
+        }
+      });
+
+    return () => {
+      active = false;
+      void supabase.removeChannel(channel);
+    };
+  }, [notify, user?.id]);
+
+  useEffect(() => {
+    if (tab === "helpdesk") {
+      void markAdminSupportNotificationsRead();
+    }
+  }, [markAdminSupportNotificationsRead, tab]);
   const totalChatUnread = chatUsers.reduce((sum, u) => sum + u.unread, 0);
   // Determine if user is super admin
-  const isSuperAdminUser = useMemo(() => 
+  const isSuperAdminUser = useMemo(() =>
     normalizeRoleKey(user?.role || "") === "admin",
     [user?.role]
   );
 
   // Features restricted to super admins only
-  const SUPER_ADMIN_ONLY_KEYS = useMemo(() => 
+  const SUPER_ADMIN_ONLY_KEYS = useMemo(() =>
     new Set([
       "registered-schools",
       "permissions",
@@ -22724,7 +21331,7 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
   );
 
   const filteredAdminNav = useMemo(
-    () =>
+    () => removeEmptyNavSections(
       ADMIN_NAV.filter((item) => {
         if (item.section) return true;
         // Block if fees disabled
@@ -22734,6 +21341,7 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
         if (!isSuperAdminUser && SUPER_ADMIN_ONLY_KEYS.has(item.key)) return false;
         return true;
       }),
+    ),
     [blockedAdminFeeKeys, isSuperAdminUser, SUPER_ADMIN_ONLY_KEYS],
   );
   const BOTTOM = useMemo(
@@ -22930,6 +21538,7 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
     );
     const payload = {
       full_name: draft.full_name.trim(),
+      gender: draft.gender || null,
       index: draft.index.trim(),
       class: draft.class,
       region: selectedSchool?.region || draft.region,
@@ -23441,7 +22050,8 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
 
   const openNotifications = () => {
     setNotificationCount(0);
-    goTab("events");
+    void markAdminSupportNotificationsRead();
+    goTab("helpdesk");
   };
   const recentActivity = useMemo(
     () =>
@@ -23468,7 +22078,7 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
 
   const renderPage = () => {
     const isSuperAdminUser = normalizeRoleKey(user?.role || "") === "admin";
-    
+
     // Check if current page is restricted to super admin
     if (SUPER_ADMIN_ONLY_KEYS.has(tab) && !isSuperAdminUser) {
       return (
@@ -23477,7 +22087,7 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
           style={{ textAlign: "center", padding: 48 }}
         >
           <div style={{ fontWeight: 700, fontSize: "1.2em", marginBottom: 16, color: "#dc2626" }}>
-            🔒 Super Admin Only
+              Super Admin Only
           </div>
           <div style={{ fontSize: ".95em", color: "#64748b", marginBottom: 24 }}>
             This feature is restricted to Super Administrators. Contact your system administrator for access.
@@ -23513,19 +22123,21 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
         />
       ),
       students: (
-        <StudentsPage
-          onEnroll={() => goTab("enroll")}
-          onEditStudent={saveAdminStudent}
-          studentsData={adminStudents}
-          onReloadStudents={loadAdminPortalData}
-          registeredSchools={registeredSchools}
-          canAssignRegisteredSchool={
-            normalizeRoleKey(user?.role || "") === "super_admin"
-          }
-          isSuperAdmin={
-            normalizeRoleKey(user?.role || "") === "super_admin"
-          }
-        />
+        <Suspense fallback={<div className="portal-loading" role="status">Loading students...</div>}>
+          <StudentsPage
+            onEnroll={() => goTab("enroll")}
+            onEditStudent={saveAdminStudent}
+            studentsData={adminStudents}
+            onReloadStudents={loadAdminPortalData}
+            registeredSchools={registeredSchools}
+            canAssignRegisteredSchool={
+              normalizeRoleKey(user?.role || "") === "super_admin"
+            }
+            isSuperAdmin={
+              normalizeRoleKey(user?.role || "") === "super_admin"
+            }
+          />
+        </Suspense>
       ),
       scores: (
         <ScoresPage
@@ -23609,6 +22221,7 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
           tableInfo={databaseTables.fees}
         />
       ),
+      helpdesk: <HelpdeskPage />,
       chat: <ChatPage chatUsers={chatUsers} onChatUsersChange={setChatUsers} />,
       documents: <DocumentWorkflowPage />,
       settings: <SettingsPage />,
@@ -23653,7 +22266,7 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
         onOpenNotifications={openNotifications}
         onOpenProfile={() => goTab("settings")}
         onReloadApp={reloadApp}
-        notificationCount={notificationCount}
+        notificationCount={notificationCount + unreadAdminSupportNotifications}
         chatUnread={totalChatUnread}
         onOpenChat={() => goTab("chat")}
         systemName={appCfg.systemName}
@@ -23826,7 +22439,7 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
                         color: "#64748b",
                       }}
                     >
-                      {expandedGroups[item.key] ? "▾" : "▸"}
+                      {expandedGroups[item.key] ? " " : " "}
                     </span>
                   )}
                 </button>
@@ -23884,7 +22497,7 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
                 borderRadius: 8,
               }}
             >
-              ⚠️ Maintenance Mode is ON — the system is currently in
+                Maintenance Mode is ON   the system is currently in
               maintenance. Student access may be restricted.
             </div>
           )}
@@ -23989,10 +22602,11 @@ function SchoolAdminPortal({ user, onLogout, darkMode, onToggleDark }) {
     [adminFeesPortalEnabled],
   );
   const filteredSchoolAdminNav = useMemo(
-    () =>
+    () => removeEmptyNavSections(
       SCHOOL_ADMIN_NAV.filter((item) =>
         item.section ? true : !blockedAdminFeeKeys.includes(item.key),
       ),
+    ),
     [blockedAdminFeeKeys],
   );
   const BOTTOM = useMemo(
@@ -24052,10 +22666,12 @@ function SchoolAdminPortal({ user, onLogout, darkMode, onToggleDark }) {
     const scopedSchoolId = school?.id || user?.registered_school_id || null;
     const payload = {
       full_name: draft.full_name.trim(),
+      gender: draft.gender || null,
       index: draft.index.trim(),
       class: draft.class,
       region: draft.region,
       parent_contact: draft.parent_contact?.trim() || null,
+      date_of_birth: draft.date_of_birth || null,
       aggregate: Number(draft.aggregate || 0),
       status: draft.status || "pending",
       photo_url: draft.photo_url?.trim() || null,
@@ -24673,19 +23289,21 @@ function SchoolAdminPortal({ user, onLogout, darkMode, onToggleDark }) {
         />
       ),
       students: (
-        <StudentsPage
-          onEnroll={() => goTab("enroll")}
-          onEditStudent={saveSchoolStudent}
-          studentsData={schoolStudents}
-          showEnrollAction={true}
-          heroKicker="School Registry"
-          heroTitle="Students linked to this school"
-          heroSub="Review only the student records currently assigned to this school workspace."
-          heroNote="Search, review, and manage the student list that belongs to this school."
-          directoryTitle="School student registry"
-          directorySub="Search by student name or ID within this school only."
-          emptyRemoteMessage="No students are currently linked to this school."
-        />
+        <Suspense fallback={<div className="portal-loading" role="status">Loading students...</div>}>
+          <StudentsPage
+            onEnroll={() => goTab("enroll")}
+            onEditStudent={saveSchoolStudent}
+            studentsData={schoolStudents}
+            showEnrollAction={true}
+            heroKicker="School Registry"
+            heroTitle="Students linked to this school"
+            heroSub="Review only the student records currently assigned to this school workspace."
+            heroNote="Search, review, and manage the student list that belongs to this school."
+            directoryTitle="School student registry"
+            directorySub="Search by student name or ID within this school only."
+            emptyRemoteMessage="No students are currently linked to this school."
+          />
+        </Suspense>
       ),
       enroll: (
         <EnrollPage
@@ -24876,7 +23494,7 @@ function SchoolAdminPortal({ user, onLogout, darkMode, onToggleDark }) {
                         color: "#64748b",
                       }}
                     >
-                      {expandedGroups[item.key] ? "▾" : "▸"}
+                      {expandedGroups[item.key] ? " " : " "}
                     </span>
                   )}
                 </button>
@@ -24936,7 +23554,7 @@ function SchoolAdminPortal({ user, onLogout, darkMode, onToggleDark }) {
                 borderRadius: 8,
               }}
             >
-              ⚠️ Maintenance Mode is ON — some workflows may be unavailable.
+                Maintenance Mode is ON   some workflows may be unavailable.
             </div>
           )}
           {schoolRegistryError && (
@@ -25477,10 +24095,79 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
   const [studentData, setStudentData] = useState(null);
   const [attendanceData, setAttendanceData] = useState([]);
   const [feesData, setFeesData] = useState([]);
+  const [courseProgressSummary, setCourseProgressSummary] = useState({
+    enrolledCount: 0,
+    completedCount: 0,
+    averageCompletion: 0,
+    progressItems: [],
+  });
   const [studentDataError, setStudentDataError] = useState("");
+
+  const demoStudentRecord = useMemo(
+    () => ({
+      id: "demo-student",
+      full_name: "Kwame Boateng",
+      display_name: "Kwame Boateng",
+      index_number: "CG-GH-2024053101",
+      index: "CG-GH-2024053101",
+      class: "Grade 12 Science",
+      region: "Greater Accra",
+      status: "confirmed",
+      photo_url: "",
+      gender: "Male",
+      date_of_birth: "2008-04-15",
+      parent_contact: "+233 20 123 4567",
+      personal_contact: "+233 24 987 6543",
+      home_address: "Accra, Ghana",
+      home_town: "Tema",
+      place_of_residence: "Nungua",
+      postal_town: "Accra",
+      po_box: "P.O. Box 2131",
+    }),
+    [],
+  );
   const [selectionRow, setSelectionRow] = useState(null);
   const [scoreValues, setScoreValues] = useState([]);
   const [scoreRecords, setScoreRecords] = useState([]);
+
+  const buildCourseProgressSummary = (enrollmentRows = [], courseRows = [], completedByEnrollment = {}) => {
+    const courseMap = new Map((courseRows || []).filter(Boolean).map((course) => [course.id, course]));
+    const progressItems = (enrollmentRows || []).map((enrollment) => {
+      const course = courseMap.get(enrollment.course_id) || { title: "Course", lessons: [] };
+      const lessonEntries = Array.isArray(course.lessons) ? course.lessons : [];
+      const lessonIds = lessonEntries
+        .map((lesson) => (lesson && typeof lesson === "object" ? lesson.id : lesson))
+        .filter((lessonId) => lessonId !== undefined && lessonId !== null && lessonId !== "");
+      const completedLessonIds = new Set(
+        ((Array.isArray(completedByEnrollment[enrollment.id]) ? completedByEnrollment[enrollment.id] : []) || [])
+          .map((lessonId) => String(lessonId)),
+      );
+      const totalLessons = lessonIds.length || 0;
+      const completedCount = lessonIds.length
+        ? lessonIds.filter((lessonId) => completedLessonIds.has(String(lessonId))).length
+        : ((Array.isArray(completedByEnrollment[enrollment.id]) ? completedByEnrollment[enrollment.id] : []) || []).length;
+      const percent = totalLessons
+        ? Math.round((completedCount / totalLessons) * 100)
+        : 0;
+
+      return {
+        title: course.title || "Course",
+        percent: Math.min(100, Math.max(0, percent)),
+      };
+    });
+
+    const averageCompletion = progressItems.length
+      ? Math.round(progressItems.reduce((sum, item) => sum + item.percent, 0) / progressItems.length)
+      : 0;
+    const completedCount = progressItems.filter((item) => item.percent >= 100).length;
+
+    return {
+      enrolledCount: progressItems.length,
+      completedCount,
+      averageCompletion,
+      progressItems: progressItems.slice(0, 3),
+    };
+  };
   const [chatUsers, setChatUsers] = useState([
     { id: 1, name: "Support Team", avatar: "S", unread: 0, status: "active" },
     { id: 2, name: "Ms. Ama Owusu", avatar: "A", unread: 0, status: "online" },
@@ -25519,17 +24206,19 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
     for (const [parent, children] of Object.entries(STUDENT_SUBPAGE_MAP)) {
       if (blocked.includes(parent)) {
         blocked.push(...children);
-      } else if (children.every((child) => blocked.includes(child))) {
-        blocked.push(parent);
       }
     }
     return blocked;
   }, [studentNavVisibility]);
+  const firstVisibleStudentTab = STUDENT_NAV.find(
+    (item) => !item.section && !blockedStudentNavKeys.includes(item.key),
+  )?.key;
   const filteredStudentNav = useMemo(
-    () =>
+    () => removeEmptyNavSections(
       STUDENT_NAV.filter((item) =>
         item.section ? true : !blockedStudentNavKeys.includes(item.key),
       ),
+    ),
     [blockedStudentNavKeys],
   );
   const BOTTOM = useMemo(
@@ -25596,17 +24285,11 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
   }, [tab, childToParent]);
   useEffect(() => {
     if (!blockedStudentNavKeys.includes(tab)) return;
-
-    const firstVisibleTab = STUDENT_NAV.find(
-      (item) => !item.section && !blockedStudentNavKeys.includes(item.key),
-    )?.key;
-    const nextTab = firstVisibleTab || "dashboard";
-
-    if (nextTab !== tab) {
-      setTab(nextTab);
-      writeStoredTab(STUDENT_TAB_KEY, nextTab);
+    if (firstVisibleStudentTab && firstVisibleStudentTab !== tab) {
+      setTab(firstVisibleStudentTab);
+      writeStoredTab(STUDENT_TAB_KEY, firstVisibleStudentTab);
     }
-  }, [blockedStudentNavKeys, tab]);
+  }, [blockedStudentNavKeys, firstVisibleStudentTab, tab]);
 
   useEffect(() => {
     const loadStudentPortalData = async () => {
@@ -25614,11 +24297,49 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
       setStudentData(null);
       setAttendanceData([]);
       setFeesData([]);
+      setCourseProgressSummary({
+        enrolledCount: 0,
+        completedCount: 0,
+        averageCompletion: 0,
+        progressItems: [],
+      });
       setScoreValues([]);
       setScoreRecords([]);
       setSelectionRow(null);
-      if (!supabase) {
-        setStudentDataError("Supabase is not configured; student records cannot be loaded.");
+      if (!supabase || isPreviewStudentUser(user?.id)) {
+        const demoScores = [82, 86, 90, 88, 93];
+        const demoFees = [
+          { id: 1, term: "Term 1", amount: 1200, paid: 1200, status: "paid" },
+          { id: 2, term: "Term 2", amount: 1200, paid: 980, status: "partial" },
+        ];
+        const demoAttendance = [
+          { id: 1, date: "2025-01-04", status: "Present" },
+          { id: 2, date: "2025-01-05", status: "Present" },
+          { id: 3, date: "2025-01-06", status: "Absent" },
+          { id: 4, date: "2025-01-07", status: "Present" },
+          { id: 5, date: "2025-01-08", status: "Present" },
+          { id: 6, date: "2025-01-09", status: "Present" },
+        ];
+        setStudentData(demoStudentRecord);
+        setAttendanceData(demoAttendance);
+        setFeesData(demoFees);
+        setScoreValues(demoScores);
+        setCourseProgressSummary({
+          enrolledCount: 3,
+          completedCount: 1,
+          averageCompletion: 72,
+          progressItems: [
+            { title: "Mathematics", percent: 90 },
+            { title: "Science", percent: 74 },
+            { title: "English", percent: 68 },
+          ],
+        });
+        setSelectionRow({
+          id: "demo-selection",
+          status: "confirmed",
+          approved: true,
+          reviewed_at: new Date().toISOString(),
+        });
         return;
       }
       if (!user?.id) {
@@ -25673,15 +24394,17 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
         student.index_number || student.index || identifier,
       );
       const fetchStudentScores = async () => {
+        const scoreColumns =
+          "id, student_id, index_number, score, subject, term, academic_year, exam_type, created_at";
         const primary = await supabase
           .from("scores")
-          .select("id, score, subject, term, academic_year, exam_type, created_at")
+          .select(scoreColumns)
           .eq("student_id", student.id);
         if (primary.error || (primary.data || []).length === 0) {
           const fallback = studentIndex
             ? await supabase
                 .from("scores")
-                .select("id, score, subject, term, academic_year, exam_type, created_at")
+                .select(scoreColumns)
                 .eq("index_number", studentIndex)
             : { data: [], error: null };
           if (!fallback.error && (fallback.data || []).length) return fallback;
@@ -25692,11 +24415,49 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
         return primary;
       };
 
+      const courseProgressPromise = (async () => {
+        try {
+          const { data: enrollmentRows, error: enrollmentError } = await supabase
+            .from("course_enrollments")
+            .select("id, course_id")
+            .eq("student_id", student.id)
+            .order("enrolled_at", { ascending: false });
+          if (enrollmentError || !Array.isArray(enrollmentRows) || !enrollmentRows.length) {
+            return { enrolledCount: 0, completedCount: 0, averageCompletion: 0, progressItems: [] };
+          }
+
+          const courseIds = [...new Set(enrollmentRows.map((row) => row.course_id).filter(Boolean))];
+          const [progressResponse, coursesResponse] = await Promise.all([
+            supabase
+              .from("course_lesson_progress")
+              .select("enrollment_id, lesson_id")
+              .in("enrollment_id", enrollmentRows.map((row) => row.id)),
+            courseIds.length
+              ? supabase.from("courses").select("id, title, lessons").in("id", courseIds)
+              : Promise.resolve({ data: [] }),
+          ]);
+
+          if (progressResponse.error) {
+            return { enrolledCount: 0, completedCount: 0, averageCompletion: 0, progressItems: [] };
+          }
+
+          const completedByEnrollment = {};
+          (progressResponse.data || []).forEach(({ enrollment_id, lesson_id }) => {
+            if (!completedByEnrollment[enrollment_id]) completedByEnrollment[enrollment_id] = [];
+            completedByEnrollment[enrollment_id].push(lesson_id);
+          });
+          return buildCourseProgressSummary(enrollmentRows, coursesResponse?.data || [], completedByEnrollment);
+        } catch (error) {
+          return { enrolledCount: 0, completedCount: 0, averageCompletion: 0, progressItems: [] };
+        }
+      })();
+
       const [
         { data: attendanceRows, error: attendanceError },
         { data: feeRows, error: feeError },
         { data: scoreRows, error: scoreError },
         selection,
+        courseProgress,
       ] = await Promise.all([
         supabase
           .from("attendance")
@@ -25719,6 +24480,7 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
             full_name: student.full_name || student.name || user?.name || "",
           },
         }),
+        courseProgressPromise,
       ]);
 
       const loadErrors = [
@@ -25731,6 +24493,7 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
           [current, ...loadErrors].filter(Boolean).join(" "),
         );
       }
+      setCourseProgressSummary(courseProgress || { enrolledCount: 0, completedCount: 0, averageCompletion: 0, progressItems: [] });
       setAttendanceData(
         (attendanceRows || []).map((row, index) => ({
           id: row.id ?? index + 1,
@@ -25754,7 +24517,21 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
         })),
       );
       const validScoreRows = (scoreRows || []).filter(
-        (row) => Number.isFinite(Number(row?.score)) && Number(row.score) >= 0,
+        (row) => {
+          const belongsToStudent =
+            String(row?.student_id ?? "") === String(student.id) ||
+            (studentIndex &&
+              String(row?.index_number ?? "") === studentIndex);
+          const score = Number(row?.score);
+          return (
+            belongsToStudent &&
+            row?.score !== null &&
+            row?.score !== undefined &&
+            Number.isFinite(score) &&
+            score >= 0 &&
+            score <= 100
+          );
+        },
       );
       setScoreRecords(validScoreRows);
       setScoreValues(
@@ -25784,7 +24561,7 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
   ]);
 
   useEffect(() => {
-    if (!supabase || !user?.id) {
+    if (!supabase || !user?.id || isPreviewStudentUser(user.id)) {
       setStudentNotifications([]);
       setStudentNotificationsError("");
       return;
@@ -25964,11 +24741,22 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
             status: selectionRow?.status || "not-submitted",
           }}
           scoreValues={scoreValues}
+          courseProgressSummary={courseProgressSummary}
           onOpenLearningLibrary={() => goTab("study-content")}
           onOpenCourses={() => goTab("courses")}
         />
       ),
-      profile: <StudentProfile user={user} studentData={studentData} />,
+      profile: (
+        <Suspense fallback={<div className="portal-loading" role="status">Loading profile...</div>}>
+          <StudentProfile
+            user={user}
+            studentData={studentData}
+            onProfileUpdated={(updatedProfile) =>
+              setStudentData((current) => ({ ...current, ...updatedProfile }))
+            }
+          />
+        </Suspense>
+      ),
       results: <StudentAcademicResultsPage scoreRecords={scoreRecords} />,
       "live-tests": <StudentLiveTestsPage user={user} studentData={studentData} />,
       "study-content": (
@@ -26094,8 +24882,18 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
       "support-tickets": <StudentTicketsPage />,
       resources: <LearningResourcesPage />,
     };
+    const visibleTab = blockedStudentNavKeys.includes(tab)
+      ? firstVisibleStudentTab
+      : tab;
+    if (!visibleTab) {
+      return (
+        <div className="card card-padded" role="status">
+          No student portal features are currently enabled. Please contact your school administrator.
+        </div>
+      );
+    }
     return (
-      pages[tab] || (
+      pages[visibleTab] || (
         <div
           className="card card-padded"
           style={{ textAlign: "center", padding: 48 }}
@@ -26121,7 +24919,7 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
           className="card card-padded"
           style={{ maxWidth: 420, textAlign: "center", padding: 40 }}
         >
-          <div style={{ fontSize: 3 + "rem", marginBottom: 12 }}>🔒</div>
+          <div style={{ fontSize: 3 + "rem", marginBottom: 12 }}> </div>
           <div
             style={{
               fontWeight: 800,
@@ -26147,7 +24945,7 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
   }
 
   return (
-    <div className="app">
+    <div className="app admin-app student-app">
       <Topbar
         user={user}
         onLogout={onLogout}
@@ -26160,6 +24958,9 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
         notificationCount={notificationCount + unreadStudentNotificationCount}
         chatUnread={totalChatUnread}
         onOpenChat={() => goTab("chat")}
+        showChat={studentNavVisibility.chat}
+        showNotifications={studentNavVisibility.announcements}
+        showProfile={studentNavVisibility.profile}
         systemName={appCfg.systemName}
       />
       <div className="shell">
@@ -26179,6 +24980,10 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
               src="https://image2url.com/r2/default/images/1773576400522-25d9d22b-3e79-4a9a-adc2-eae0031fbfe1.png"
               alt="Campus Ghana"
             />
+            <span className="admin-sidebar-brand-copy">
+              <strong>Campus Ghana</strong>
+              <small>STUDENT PORTAL</small>
+            </span>
           </button>
           {filteredStudentNav.map((item, i) => {
             if (item.section)
@@ -26233,7 +25038,7 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
                         color: "#64748b",
                       }}
                     >
-                      {expandedGroups[item.key] ? "▾" : "▸"}
+                      {expandedGroups[item.key] ? " " : " "}
                     </span>
                   )}
                 </button>
@@ -26291,7 +25096,7 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
                 borderRadius: 8,
               }}
             >
-              ⚠️ System is currently under maintenance. Some features may be
+                System is currently under maintenance. Some features may be
               unavailable.
             </div>
           )}
@@ -26334,7 +25139,7 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
 // ROOT
 function GhanaCampus() {
   const [session, setSession] = useState(null);
-  const [authLoading, setAuthLoading] = useState(!!supabase);
+  const [authLoading, setAuthLoading] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [appSettings, setAppSettings] = useState(DEFAULT_SETTINGS);
   const authRestoreRequestRef = useRef(0);
@@ -26599,14 +25404,22 @@ function GhanaCampus() {
     if (!data?.student_id) {
       return { ok: false, error: "The account was created without a Student ID. Contact support before trying again." };
     }
-    return { ok: true, studentId: data.student_id };
+    return { ok: true, studentId: data.student_id, smsSent: data.sms_sent === true };
   };
 
 
-  const logout = () => {
-    if (supabase) supabase.auth.signOut();
-    setSession(null);
-    writeAppSession(null);
+  const logout = async () => {
+    try {
+      if (supabase) {
+        await supabase.auth.signOut();
+      }
+    } catch (error) {
+      console.error("Could not sign out cleanly:", error);
+    } finally {
+      setSession(null);
+      setDarkMode(false);
+      writeAppSession(null);
+    }
   };
 
   useEffect(() => {
@@ -26673,6 +25486,20 @@ function GhanaCampus() {
     };
   }, [hydrateSessionFromSupabase]);
 
+  const previewStudentSession = {
+    portal: "student",
+    user: {
+      id: "preview-student",
+      authUserId: "preview-student",
+      email: "student@campusghana.demo",
+      role: "student",
+      name: "Kwame Boateng",
+      index: "CG-GH-2024053101",
+      registered_school_id: null,
+      managed_school_name: "",
+    },
+  };
+
   return (
     <SettingsContext.Provider
       value={{ session, cfg: appSettings, updateCfg: setAppSettings }}
@@ -26684,11 +25511,8 @@ function GhanaCampus() {
           <p>Restoring your session...</p>
         </div>
       ) : !session ? (
-        <Suspense fallback={<div className="portal-loading" role="status">Loading sign-in...</div>}>
-          <Landing
-            onSelect={(portal, user, password) => login(portal, user, password)}
-              onCreateAccount={(details) => registerStudent(details)}
-            />
+        <Suspense fallback={<div className="portal-loading" role="status"><div className="loading-spinner" /><p>Loading sign in </p></div>}>
+          <Landing onSelect={login} onCreateAccount={registerStudent} />
         </Suspense>
       ) : session.portal === "admin" ? (
         <AdminPortal
@@ -26882,7 +25706,7 @@ function ParentPortal({ user, onLogout, darkMode, onToggleDark }) {
                 </div>
                 <div className="child-info">
                   <h4>{child.full_name}</h4>
-                  <p>{child.class} • {child.relationship}</p>
+                  <p>{child.class}   {child.relationship}</p>
                 </div>
               </div>
             ))}

@@ -31,26 +31,60 @@ const allowedRegions = new Set([
   "Western North",
 ]);
 
-const allowedClasses = new Set([
-  "JHS 1",
-  "JHS 2",
-  "JHS 3",
-  "SHS 1",
-  "SHS 2",
-  "SHS 3",
-  "University Level 100",
-  "University Level 200",
-  "University Level 300",
-  "University Level 400",
-  "University Level 500",
-  "University Level 600",
-]);
+const allowedLevels = new Set(["JHS", "SHS", "University"]);
 
 const cleanText = (value: unknown) =>
   typeof value === "string" ? value.trim() : "";
 
 const logRollbackError = (action: string, error: unknown) => {
   if (error) console.error(`Student signup rollback failed (${action}):`, error);
+};
+
+const sendStudentIdSms = async (recipient: string, studentId: string) => {
+  const apiKey = Deno.env.get("CLIFZE_SMS_API_KEY")?.trim();
+  const senderId = Deno.env.get("CLIFZE_SMS_SENDER_ID")?.trim();
+  if (!apiKey || !senderId || senderId.length > 11) {
+    console.error("Student ID SMS was not sent: Clifze SMS secrets are missing or invalid.");
+    return false;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const response = await fetch("https://www.clifze.shop/api/v1/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        api_key: apiKey,
+        sender_id: senderId,
+        recipient,
+        message: `Your Campus Ghana Student ID is ${studentId}. Save it to sign in with your password.`,
+      }),
+      signal: controller.signal,
+    });
+    const responseText = await response.text();
+    let result: { status?: string } | null = null;
+    try {
+      result = JSON.parse(responseText);
+    } catch {
+      console.error("Clifze SMS returned an invalid response.", {
+        httpStatus: response.status,
+      });
+      return false;
+    }
+    if (!response.ok || result?.status !== "success") {
+      console.error("Clifze SMS did not accept the Student ID message.", {
+        httpStatus: response.status,
+      });
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error("Student ID SMS request failed:", error);
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
 };
 
 Deno.serve(async (request) => {
@@ -114,8 +148,8 @@ Deno.serve(async (request) => {
   if (institution.length < 2 || institution.length > 180) {
     return respond({ error: "Enter an institution or school between 2 and 180 characters." }, 400);
   }
-  if (!allowedClasses.has(studentClass)) {
-    return respond({ error: "Choose a valid level or class." }, 400);
+  if (!allowedLevels.has(studentClass)) {
+    return respond({ error: "Choose JHS, SHS, or University." }, 400);
   }
   if (!allowedRegions.has(region) || district.length < 2 || district.length > 150) {
     return respond({ error: "Choose a valid Ghana region and district." }, 400);
@@ -160,6 +194,9 @@ Deno.serve(async (request) => {
   const phone = normalizedPhoneDigits.startsWith("0")
     ? `+233${normalizedPhoneDigits.slice(1)}`
     : `+${normalizedPhoneDigits}`;
+  const smsRecipient = normalizedPhoneDigits.startsWith("0")
+    ? normalizedPhoneDigits
+    : `0${normalizedPhoneDigits.slice(-9)}`;
   const serviceClient = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
@@ -302,5 +339,6 @@ Deno.serve(async (request) => {
     return respond({ error: message }, 500);
   }
 
-  return respond({ student_id: studentIndex }, 201);
+  const smsSent = await sendStudentIdSms(smsRecipient, studentIndex);
+  return respond({ student_id: studentIndex, sms_sent: smsSent }, 201);
 });

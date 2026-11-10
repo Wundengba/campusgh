@@ -1,59 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GHANA_DISTRICTS } from "../data/ghanaDistricts.js";
+import { resizeStudentPhotoDataUrl } from "../utils/studentPhoto.js";
 import { Ico } from "./Ico.jsx";
 import "./StudentSignup.css";
 
-const STUDENT_CLASSES = [
-  "JHS 1",
-  "JHS 2",
-  "JHS 3",
-  "SHS 1",
-  "SHS 2",
-  "SHS 3",
-  "University Level 100",
-  "University Level 200",
-  "University Level 300",
-  "University Level 400",
-  "University Level 500",
-  "University Level 600",
-];
+const STUDENT_LEVELS = ["JHS", "SHS", "University"];
 
 const getToday = () => {
   const date = new Date();
   const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
   return localDate.toISOString().slice(0, 10);
-};
-
-const resizePhoto = async (file) => {
-  const imageUrl = URL.createObjectURL(file);
-  try {
-    const image = new Image();
-    image.src = imageUrl;
-    await image.decode();
-    const scale = Math.min(1, 512 / Math.max(image.naturalWidth, image.naturalHeight));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
-    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
-    const context = canvas.getContext("2d");
-    if (!context) throw new Error("Your photo could not be processed.");
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.82));
-    if (!blob) throw new Error("Your photo could not be processed.");
-    return await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result !== "string") {
-          reject(new Error("Your photo could not be read."));
-          return;
-        }
-        resolve(reader.result);
-      };
-      reader.onerror = () => reject(new Error("Your photo could not be read."));
-      reader.readAsDataURL(blob);
-    });
-  } finally {
-    URL.revokeObjectURL(imageUrl);
-  }
 };
 
 export function StudentSignup({ onCreateAccount, onBackToLogin }) {
@@ -76,6 +32,8 @@ export function StudentSignup({ onCreateAccount, onBackToLogin }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [createdStudentId, setCreatedStudentId] = useState("");
+  const [studentIdSmsSent, setStudentIdSmsSent] = useState(false);
+  const [coreDetailsConfirmed, setCoreDetailsConfirmed] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const errorDialogRef = useRef(null);
@@ -107,6 +65,9 @@ export function StudentSignup({ onCreateAccount, onBackToLogin }) {
   const updateField = (event) => {
     const { name, value } = event.target;
     setError("");
+    if (["fullName", "gender", "dateOfBirth"].includes(name)) {
+      setCoreDetailsConfirmed(false);
+    }
     setForm((current) => ({
       ...current,
       [name]: value,
@@ -148,7 +109,7 @@ export function StudentSignup({ onCreateAccount, onBackToLogin }) {
     setError("");
     setLoading(true);
     try {
-      const photoDataUrl = await resizePhoto(photo);
+      const photoDataUrl = await resizeStudentPhotoDataUrl(photo);
       const result = await onCreateAccount({
         ...form,
         email: form.email.trim().toLowerCase(),
@@ -161,6 +122,7 @@ export function StudentSignup({ onCreateAccount, onBackToLogin }) {
         setError(result?.error || "Your account could not be created.");
         return;
       }
+      setStudentIdSmsSent(result.smsSent);
       setCreatedStudentId(result.studentId);
     } catch (signupError) {
       setError(signupError instanceof Error
@@ -174,13 +136,22 @@ export function StudentSignup({ onCreateAccount, onBackToLogin }) {
   if (createdStudentId) {
     return (
       <section className="signup-success" aria-live="polite">
-        <div className="signup-success-icon" aria-hidden="true">✓</div>
+        <div className="signup-success-icon" aria-hidden="true">OK</div>
         <h2>Your student account is ready</h2>
         <p>Save your Student ID. You will need it and your password to sign in.</p>
         <div className="signup-student-id">
           <span>Student ID</span>
           <strong>{createdStudentId}</strong>
         </div>
+        <p
+          className={`signup-sms-status ${studentIdSmsSent ? "signup-sms-sent" : "signup-sms-failed"}`}
+          role="status"
+        >
+          {studentIdSmsSent
+            ? `A text message with your Student ID was sent to ${form.phone}.`
+            : "We could not send your Student ID by SMS. Save the ID above and contact an administrator if you need help."}
+        </p>
+        <p>Your Student ID is a core detail and cannot be changed by you after signup. Contact an administrator if it needs correction.</p>
         <button
           className="btn-primary"
           type="button"
@@ -226,11 +197,11 @@ export function StudentSignup({ onCreateAccount, onBackToLogin }) {
           <input name="institution" value={form.institution} onChange={updateField} autoComplete="organization" maxLength={180} required />
         </label>
         <label className="signup-field">
-          <span>Level or class</span>
+          <span>Education level</span>
           <select name="studentClass" value={form.studentClass} onChange={updateField} required>
-            <option value="">Select level or class</option>
-            {STUDENT_CLASSES.map((studentClass) => (
-              <option key={studentClass} value={studentClass}>{studentClass}</option>
+            <option value="">Select education level</option>
+            {STUDENT_LEVELS.map((level) => (
+              <option key={level} value={level}>{level}</option>
             ))}
           </select>
         </label>
@@ -303,7 +274,17 @@ export function StudentSignup({ onCreateAccount, onBackToLogin }) {
         </label>
       </div>
 
-      <button className="btn-primary signup-submit" type="submit" disabled={loading}>
+      <label className="signup-core-confirmation">
+        <input
+          type="checkbox"
+          checked={coreDetailsConfirmed}
+          onChange={(event) => setCoreDetailsConfirmed(event.target.checked)}
+          required
+        />
+        <span>I have checked my full name, gender, and date of birth and understand these core details can only be corrected by an administrator after signup.</span>
+      </label>
+
+      <button className="btn-primary signup-submit" type="submit" disabled={loading || !coreDetailsConfirmed}>
         {loading ? "Creating your account..." : "Create Account"}
       </button>
       <button className="signup-back" type="button" onClick={() => onBackToLogin("")} disabled={loading}>

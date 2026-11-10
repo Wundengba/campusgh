@@ -344,7 +344,7 @@ export default function StudentStudyContentPage({ studentData }) {
             <h2 id="learning-level-heading">Your learning path</h2>
             <p>
               {learningLevel
-                ? `Showing all published materials for ${learningLevel.name}${studentClass ? ` · ${studentClass}` : ""}.`
+                ? `Showing all published materials for ${learningLevel.name}${studentClass ? `   ${studentClass}` : ""}.`
                 : "Select your education level to see all materials published for that group."}
             </p>
           </div>
@@ -429,7 +429,7 @@ export default function StudentStudyContentPage({ studentData }) {
               <div className="test-description">{item.description}</div>
               {completed && (
                 <div style={{ color: '#10b981', fontWeight: 'bold', marginBottom: '12px' }}>
-                  ✓ Completed
+                  Completed
                 </div>
               )}
               <div className="test-actions">
@@ -473,7 +473,7 @@ export default function StudentStudyContentPage({ studentData }) {
           <div className="modal-content large-modal fullscreen-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3>{selectedContent.title}</h3>
-              <button className="modal-close" onClick={() => setShowContentModal(false)}>×</button>
+              <button className="modal-close" onClick={() => setShowContentModal(false)}>X</button>
             </div>
             <div className="modal-body">
               <div style={{ marginBottom: '20px' }}>
@@ -586,9 +586,9 @@ export default function StudentStudyContentPage({ studentData }) {
             <div className="modal-header">
               <h3>
                 Quiz: {selectedContent?.title}
-                {Array.isArray(selectedContent?.chapters) && selectedContent.chapters.length > 0 ? ` — Chapter ${activeChapterIndex + 1}` : ''}
+                {Array.isArray(selectedContent?.chapters) && selectedContent.chapters.length > 0 ? ` - Chapter ${activeChapterIndex + 1}` : ''}
               </h3>
-              <button className="modal-close" onClick={() => { setShowQuiz(false); setQuestions([]); setQuizAnswers({}); setQuizSubmitted(false); setQuizScore(0); setQuizPassed(false); }}>×</button>
+              <button className="modal-close" onClick={() => { setShowQuiz(false); setQuestions([]); setQuizAnswers({}); setQuizSubmitted(false); setQuizScore(0); setQuizPassed(false); }}>X</button>
             </div>
             <div className="modal-body">
               {!quizSubmitted ? (
@@ -678,7 +678,7 @@ export default function StudentStudyContentPage({ studentData }) {
               ) : (
                 <div style={{ textAlign: 'center' }}>
                   <div style={{ fontSize: '2em', marginBottom: '16px' }}>
-                    {quizPassed ? '🎉' : '📚'}
+                    {quizPassed ? 'Complete' : 'Study'}
                   </div>
                   <h3>Quiz Completed!</h3>
                   <div style={{ fontSize: '1.2em', margin: '16px 0' }}>

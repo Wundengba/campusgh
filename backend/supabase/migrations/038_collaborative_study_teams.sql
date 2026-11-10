@@ -1,3 +1,6 @@
+alter table public.students
+  add column if not exists deleted_at timestamptz;
+
 create table if not exists public.collaborative_study_teams (
   id uuid primary key default gen_random_uuid(),
   name text not null check (length(btrim(name)) between 3 and 100),
@@ -273,26 +276,6 @@ begin
     if invite_user_id = actor_id then
       raise exception 'You cannot invite yourself.';
     end if;
-    if invite_role not in ('student', 'admin', 'school_admin', 'teacher', 'staff') then
-      raise exception 'This account role cannot participate in study teams.';
-    end if;
-
-    if actor_role = 'student' then
-      if invite_role <> 'student' then
-        raise exception 'Student-created teams can invite students from the same class only.';
-      end if;
-      if not exists (
-        select 1
-          from public.students as student
-         where student.auth_user_id = invite_user_id
-           and student.deleted_at is null
-           and lower(btrim(student.class)) = lower(btrim(p_class_level))
-           and public.education_level_for_class(student.class) = p_education_level
-      ) then
-        raise exception 'Student invitations must match the team education level and class.';
-      end if;
-    end if;
-
     insert into public.collaborative_study_team_members (
       team_id, user_id, role_key, display_name, invited_by, invitation_status
     )

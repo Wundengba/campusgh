@@ -149,15 +149,15 @@ export function getStudentNavVisibility(config = {}) {
   const existingVisibility = config.studentNavVisibility || {};
   return Object.fromEntries(
     Object.entries(DEFAULT_SETTINGS.studentNavVisibility).map(([key, defaultValue]) => {
-      if (Object.prototype.hasOwnProperty.call(existingVisibility, key)) {
-        return [key, existingVisibility[key] !== false];
-      }
       const legacyKey = LEGACY_STUDENT_NAV_SETTINGS[key];
+      const explicitlyVisible = Object.prototype.hasOwnProperty.call(existingVisibility, key)
+        ? existingVisibility[key] !== false
+        : defaultValue;
       return [
         key,
-        legacyKey && Object.prototype.hasOwnProperty.call(config, legacyKey)
-          ? config[legacyKey] !== false
-          : defaultValue,
+        explicitlyVisible &&
+          (!legacyKey || config[legacyKey] !== false) &&
+          (key !== "results" || config.showResultsToStudents !== false),
       ];
     }),
   );

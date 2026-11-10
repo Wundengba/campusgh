@@ -41,7 +41,7 @@ const CustomDashboard = ({ user, stats, recentActivity }) => {
           <div className="activity-list">
             {recentActivity?.map((activity, index) => (
               <div key={index} className="activity-item">
-                <div className="activity-icon">📚</div>
+                <div className="activity-icon"> </div>
                 <div className="activity-content">
                   <div className="activity-title">{activity.title}</div>
                   <div className="activity-time">{activity.time}</div>
@@ -56,15 +56,15 @@ const CustomDashboard = ({ user, stats, recentActivity }) => {
           <h3>School Features</h3>
           <div className="feature-grid">
             <div className="feature-item">
-              <span className="feature-icon">🎓</span>
+              <span className="feature-icon"> </span>
               <span>Advanced Analytics</span>
             </div>
             <div className="feature-item">
-              <span className="feature-icon">👨‍👩‍👧‍👦</span>
+              <span className="feature-icon"> </span>
               <span>Parent Portal</span>
             </div>
             <div className="feature-item">
-              <span className="feature-icon">📱</span>
+              <span className="feature-icon"> </span>
               <span>Mobile App</span>
             </div>
           </div>

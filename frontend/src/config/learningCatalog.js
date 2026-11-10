@@ -1,13 +1,13 @@
 export const LEARNING_LEVELS = [
   {
     key: "jhs",
-    label: "JHS · BECE",
+    label: "JHS   BECE",
     name: "Junior High School",
     description: "BECE preparation, lesson notes, and past questions.",
   },
   {
     key: "shs",
-    label: "SHS · WASSCE",
+    label: "SHS   WASSCE",
     name: "Senior High School",
     description: "Clear lessons for WASSCE core and elective subjects.",
   },

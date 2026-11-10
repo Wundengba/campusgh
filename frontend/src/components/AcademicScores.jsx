@@ -246,9 +246,9 @@ export default function AcademicScores() {
           <span className={styles.metaLabel}>Assessment</span>
           <strong>Class test</strong>
           <span>
-            {currentTerm} · {academicYear}
+            {currentTerm}   {academicYear}
           </span>
-          <span>Score range: 0–100</span>
+          <span>Score range: 0-100</span>
         </div>
       </header>
 
@@ -256,14 +256,14 @@ export default function AcademicScores() {
         <article className={styles.summaryCard}>
           <span className={styles.summaryLabel}>Students</span>
           <strong className={styles.summaryValue}>
-            {loading ? "—" : scores.length.toLocaleString()}
+            {loading ? " " : scores.length.toLocaleString()}
           </strong>
           <span className={styles.summaryHint}>In the current student roster</span>
         </article>
         <article className={styles.summaryCard}>
           <span className={styles.summaryLabel}>Scores entered</span>
           <strong className={styles.summaryValue}>
-            {loading ? "—" : scoreValues.length.toLocaleString()}
+            {loading ? " " : scoreValues.length.toLocaleString()}
           </strong>
           <span className={styles.summaryHint}>
             Across {activeSubjects.length} selected subject
@@ -273,7 +273,7 @@ export default function AcademicScores() {
         <article className={styles.summaryCard}>
           <span className={styles.summaryLabel}>Average score</span>
           <strong className={styles.summaryValue}>
-            {loading || averageScore === null ? "—" : `${averageScore}%`}
+            {loading || averageScore === null ? " " : `${averageScore}%`}
           </strong>
           <span className={styles.summaryHint}>Based on entered scores</span>
         </article>
@@ -301,13 +301,13 @@ export default function AcademicScores() {
             <h2 className={styles.tableTitle}>Student scorebook</h2>
             <p className={styles.tableSubtitle}>
               {loading
-                ? "Loading student records…"
+                ? "Loading student records..."
                 : `${filteredScores.length} of ${scores.length} students`}
             </p>
           </div>
           <label className={styles.searchWrap}>
             <span className={styles.searchIcon} aria-hidden="true">
-              ⌕
+
             </span>
             <span className={styles.visuallyHidden}>Search students</span>
             <input
@@ -471,7 +471,7 @@ export default function AcademicScores() {
         {loading && (
           <div className={styles.loadingState} role="status">
             <span className={styles.spinner} />
-            Loading student scores…
+            Loading student scores...
           </div>
         )}
 
@@ -488,7 +488,7 @@ export default function AcademicScores() {
             {saving ? (
               <>
                 <span className={styles.buttonSpinner} />
-                Saving scores…
+                Saving scores...
               </>
             ) : (
               "Save scores"

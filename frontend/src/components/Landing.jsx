@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Ico } from "./Ico.jsx";
-import "./Landing.module.css";
+import "./Landing.css";
 
 const StudentSignup = lazy(() =>
   import("./StudentSignup.jsx").then((module) => ({ default: module.StudentSignup })),
@@ -109,7 +109,7 @@ export function Landing({ onSelect, onCreateAccount }) {
           <div className="landing-logo"><img src="https://image2url.com/r2/default/images/1773576400522-25d9d22b-3e79-4a9a-adc2-eae0031fbfe1.png" alt="Campus Ghana" /></div>
         </div>
         <div className="landing-title">Campus Ghana</div>
-        <div className="landing-sub">BECE preparation · WASSCE lessons<br />University course resources</div>
+        <div className="landing-sub">BECE preparation   WASSCE lessons<br />University course resources</div>
         {canShowInstallButton && (
           <div className="landing-install-wrap">
             <button className="landing-install-btn" onClick={handleInstallApp} disabled={installingApp}>
@@ -168,7 +168,7 @@ export function Landing({ onSelect, onCreateAccount }) {
             <input
               className="form-input"
               type={mode === "student" ? "text" : "email"}
-              placeholder={mode === "student" ? "CG-AS011126001 or 12-digit ID" : "Staff email"}
+              placeholder={mode === "student" ? "CG-AS011126001" : "Staff email"}
               aria-label={mode === "student" ? "Student ID" : "Staff email"}
               value={mode === "student" ? studentIndex : email}
               onChange={(e) => mode === "student"
@@ -203,12 +203,15 @@ export function Landing({ onSelect, onCreateAccount }) {
             </button>
           </div>
           <div className="login-help-row">
-            <span>{mode === "student" ? "Use your CG- ID or legacy 12-digit ID" : "Secure staff access"}</span>
-            <span>Need help? Contact your school</span>
+            <span>{mode === "student" ? "Use your CG- ID" : "Secure staff access"}</span>
+            <span>
+              Need help? Contact the{" "}
+              <a href="mailto:mrwundengba@gmail.com">administrator</a>.
+            </span>
           </div>
           <button className="btn-primary" type="submit" disabled={loading}>
             <span>{loading ? "Please wait..." : "Sign In"}</span>
-            {!loading && <span className="login-submit-arrow" aria-hidden="true">→</span>}
+            {!loading && <span className="login-submit-arrow" aria-hidden="true"> </span>}
           </button>
         </form>
         {mode === "student" && (
@@ -223,12 +226,12 @@ export function Landing({ onSelect, onCreateAccount }) {
               <span className="signup-link-action">Create a student account</span>
               <span className="signup-link-note">Get started with your personalized learning library.</span>
             </span>
-            <span className="signup-link-arrow" aria-hidden="true">→</span>
+            <span className="signup-link-arrow" aria-hidden="true"> </span>
           </button>
         )}
           </>
         )}
-        <div className="landing-footer">LEARN <span>•</span> IMPROVE <span>•</span> ACHIEVE</div>
+        <div className="landing-footer">LEARN | IMPROVE | ACHIEVE</div>
       </div>
     </div>
   );

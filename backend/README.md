@@ -6,7 +6,7 @@ This folder now contains the Supabase schema setup needed by the frontend.
 
 [campusghana_all_migrations.sql](campusghana_all_migrations.sql) combines the required base schema and executable migrations in order for a brand-new Supabase project. Run it once in the SQL Editor after creating the project. The legacy base schema comes first because migration 001 references its student and profile tables. Do not run it on an existing project or database where any of these migrations were already applied; use the individual migration instructions below for incremental updates. Migration 010 is absent, and empty placeholder files are omitted.
 
-After applying the SQL, deploy the Edge Functions required by your enabled features. Student account creation requires deploying `register-student` with `--no-verify-jwt`; student login provisioning requires deploying `provision-student-logins`. See the instructions below.
+After applying the SQL, deploy the Edge Functions required by your enabled features. Student account creation requires deploying `register-student` with `--no-verify-jwt`; student login provisioning requires deploying `provision-student-logins`; self-service student deletions require deploying `delete-student-account`. See the instructions below.
 
 ## Apply the remaining migrations in one run
 
@@ -20,6 +20,10 @@ Apply [supabase/migrations/024_student_id_password_auth.sql](supabase/migrations
 
 After 024, apply [supabase/migrations/025_student_portal_records.sql](supabase/migrations/025_student_portal_records.sql) and then [supabase/migrations/026_student_document_storage.sql](supabase/migrations/026_student_document_storage.sql). Migration 025 adds student-owned records for study plans, payment notices, payment-plan requests, attendance corrections, support tickets, goals, document metadata, assignment status, and announcement-read state. It also replaces the public fees policy with student read-only access and admin or school-scoped school-admin management. Migration 026 creates a private document bucket with per-student folder access.
 
+Apply [supabase/migrations/033_support_ticket_notifications.sql](supabase/migrations/033_support_ticket_notifications.sql) after migrations 025 and 031. It creates persistent admin alerts for new student support tickets and a permission-checked RPC that saves admin responses/status changes and creates a student notification atomically. Enable this migration before using support-ticket notifications.
+
+Apply [supabase/migrations/034_student_self_service_profile.sql](supabase/migrations/034_student_self_service_profile.sql) after migrations 009, 030, and 031. It lets students update only non-core profile fields through a restricted RPC and allows each student to replace their own profile photo. Full name, gender, date of birth, and Student ID remain admin-only.
+
 Apply [supabase/migrations/028_scores_by_term_and_academic_year.sql](supabase/migrations/028_scores_by_term_and_academic_year.sql) after migration 026. It assigns existing scores without a recorded period to an explicitly labeled unspecified term/year, then allows a separate score for each subject, assessment, term, and academic year. Academic Scores uses the current term and academic year from Settings when saving; the student Results page groups records by academic year and term.
 
 The student payment form only saves a payment notice for staff verification; it does not charge a card, transfer funds, or generate a transaction receipt. Actual payment processing requires selecting and integrating a payment provider.
@@ -32,6 +36,7 @@ Deploy the function from the repository's `backend` directory after linking the 
 
 ```sh
 supabase functions deploy provision-student-logins --project-ref YOUR_PROJECT_REF
+supabase functions deploy delete-student-account --project-ref YOUR_PROJECT_REF
 ```
 
 The function uses the Supabase-provided `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` secrets. Never expose the service-role key in frontend configuration.
@@ -124,8 +129,16 @@ supabase functions deploy register-student --no-verify-jwt --project-ref YOUR_PR
 
 The signup form creates a confirmed student Auth account, a student profile and record, and a public profile-photo object. It generates the region-based Student ID, which must be saved and used with the chosen password to sign in. Email and phone are stored as student contact details; email is not currently verified and is not the sign-in ID. When an administrator confirms a profile, the student receives a persistent portal notification and a verified tick appears beside their name. Never expose the Supabase service-role key in the frontend.
 
+Self-registration also sends the generated Student ID by SMS through Clifze. Set the `CLIFZE_SMS_API_KEY` and `CLIFZE_SMS_SENDER_ID` Edge Function secrets before deploying `register-student`; the sender ID must be approved by Clifze. For example, set them with `supabase secrets set CLIFZE_SMS_API_KEY=... CLIFZE_SMS_SENDER_ID=... --project-ref YOUR_PROJECT_REF`. If SMS delivery fails, account creation remains successful and the signup page tells the student to save the displayed ID and contact an administrator.
+
 The signup region selector uses the 16-region/261-district dataset from [Eric Bidopa's ghana-geo-data](https://github.com/EricBidopa/ghana-geo-data), adapted under CC BY-SA 4.0 with attribution in the data module.
 
 For the Courses page, apply [supabase/migrations/032_courses_and_enrollment.sql](supabase/migrations/032_courses_and_enrollment.sql) after migration 031. It creates the course catalog, student enrollments, per-lesson progress, and authenticated RLS policies. Admins can create, edit, publish, and remove courses; students can enroll in published courses and track their own lesson completion.
 
-For cross-role study teams, apply [supabase/migrations/037_deleted_student_retention.sql](supabase/migrations/037_deleted_student_retention.sql) and then [supabase/migrations/038_collaborative_study_teams.sql](supabase/migrations/038_collaborative_study_teams.sql). Students can create teams for their own education level and class and invite matching students; admins and tutors can create teams and invite students, tutors, and admins. Invitees accept or decline in the Study Teams page. Accepted members can discuss and share links or private files up to 20 MB.
+AI-generated course checkpoint quizzes have been removed. The Courses page tracks learner progress by lesson completion; it does not call an AI provider. Migration 035 and its checkpoint tables may remain in databases where they were previously applied, but they are no longer used.
+
+In the admin Courses page, the selected education level applies to every item in the import batch, including levels present in JSON.
+
+To store and display course covers and imported document images, apply [supabase/migrations/036_course_images.sql](supabase/migrations/036_course_images.sql) after migration 035. It adds a private `course-images` Storage bucket, admin upload policies, and the course cover path. Authenticated learners can view images only when they belong to published courses. PDF imports include optimized previews of up to 12 pages; DOCX imports preserve supported embedded JPEG, PNG, WebP, and GIF images. Admins can choose a separate cover image in the import review before confirming.
+
+For cross-role study teams, apply [supabase/migrations/037_deleted_student_retention.sql](supabase/migrations/037_deleted_student_retention.sql), [supabase/migrations/038_collaborative_study_teams.sql](supabase/migrations/038_collaborative_study_teams.sql), [supabase/migrations/039_study_team_realtime_and_resources.sql](supabase/migrations/039_study_team_realtime_and_resources.sql), and [supabase/migrations/040_study_chat_direct_messages_and_uploads.sql](supabase/migrations/040_study_chat_direct_messages_and_uploads.sql), in order. Students can create teams for their own education level and class, and team creators can invite any registered account regardless of role or class. Invitees accept or decline in the Study Teams page. Accepted members can discuss in real time, see typing status, and share links or private files up to 20 MB. The Teams and Chats views support team conversations and private chats between members of the same team, with profile photos and voice notes where microphone access is available.

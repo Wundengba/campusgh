@@ -3778,6 +3778,10 @@ body.dark-mode .app .bottom-nav-item.active {
   border-radius:inherit;
   background:linear-gradient(90deg, #5fa5ff, #7d6cf0 58%, #3ec5c1);
 }
+.student-dashboard-lesson-count {
+  color:#718096;
+  font-size:.68rem;
+}
 .student-dashboard-hero-card {
   padding:18px 18px 14px;
   border:1px solid rgba(255,255,255,.72);
@@ -3877,10 +3881,164 @@ body.dark-mode .app .bottom-nav-item.active {
   line-height:1.6;
   margin:0;
 }
+.student-dashboard-metric-row {
+  grid-template-columns:repeat(auto-fit,minmax(155px,1fr));
+}
+.student-dashboard-next-action {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:20px;
+  padding:16px 18px;
+  border:1px solid rgba(148,163,184,.2);
+  border-radius:17px;
+  background:linear-gradient(110deg,rgba(255,255,255,.82),rgba(240,246,255,.74));
+}
+.student-dashboard-next-action h2 {
+  margin:5px 0 4px;
+  color:#24314b;
+  font-size:1.15rem;
+  letter-spacing:-.025em;
+}
+.student-dashboard-next-action p {
+  margin:0;
+  color:#63718a;
+  font-size:.8rem;
+  line-height:1.5;
+}
+.student-dashboard-next-action button,
+.student-dashboard-empty-state button {
+  flex:0 0 auto;
+  min-height:40px;
+  padding:0 15px;
+  border:0;
+  border-radius:10px;
+  color:#fff;
+  background:#176b55;
+  font:inherit;
+  font-size:.76rem;
+  font-weight:750;
+  cursor:pointer;
+}
+.student-dashboard-next-action button:hover,
+.student-dashboard-empty-state button:hover {
+  background:#125440;
+}
+.student-dashboard-text-link {
+  padding:4px 0;
+  border:0;
+  color:#176b55;
+  background:none;
+  font:inherit;
+  font-size:.75rem;
+  font-weight:750;
+  text-align:left;
+  cursor:pointer;
+}
+.student-dashboard-text-link:hover {
+  text-decoration:underline;
+  text-underline-offset:3px;
+}
+.student-dashboard-text-link:focus-visible,
+.student-dashboard-next-action button:focus-visible,
+.student-dashboard-empty-state button:focus-visible {
+  outline:3px solid rgba(23,107,85,.28);
+  outline-offset:3px;
+}
+.student-dashboard-empty-state {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:14px;
+  min-height:58px;
+  padding:12px 14px;
+  border:1px dashed rgba(125,145,176,.3);
+  border-radius:13px;
+  background:rgba(255,255,255,.45);
+}
+.student-dashboard-empty-state p {
+  margin:0;
+  color:#68788f;
+  font-size:.8rem;
+  line-height:1.5;
+}
+.student-dashboard-overview-grid {
+  display:grid;
+  grid-template-columns:minmax(0,1.15fr) minmax(250px,.85fr);
+  gap:16px;
+}
+.student-dashboard-overview-grid.is-single {
+  grid-template-columns:1fr;
+}
+.student-dashboard-attendance-chart {
+  display:grid;
+  grid-template-columns:repeat(6,minmax(0,1fr));
+  align-items:end;
+  gap:10px;
+  min-height:158px;
+  padding-top:12px;
+}
+.student-dashboard-attendance-month {
+  display:grid;
+  grid-template-rows:auto 104px auto;
+  justify-items:center;
+  gap:7px;
+  min-width:0;
+}
+.student-dashboard-attendance-month > strong {
+  color:#415b7a;
+  font-size:.68rem;
+}
+.student-dashboard-attendance-track {
+  display:flex;
+  align-items:flex-end;
+  width:min(100%,30px);
+  height:100%;
+  overflow:hidden;
+  border-radius:7px;
+  background:rgba(205,216,241,.48);
+}
+.student-dashboard-attendance-track i {
+  display:block;
+  width:100%;
+  min-height:2px;
+  border-radius:7px 7px 0 0;
+  background:linear-gradient(180deg,#52b889,#278165);
+}
+.student-dashboard-attendance-month > span {
+  color:#7a879b;
+  font-size:.67rem;
+}
+.student-dashboard-summary-list {
+  display:grid;
+  gap:0;
+  margin-top:10px;
+}
+.student-dashboard-summary-list > div {
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+  padding:11px 0;
+  border-bottom:1px solid rgba(148,163,184,.18);
+  font-size:.77rem;
+}
+.student-dashboard-summary-list > div > span {
+  color:#718096;
+}
+.student-dashboard-summary-list > div > strong {
+  color:#354861;
+  font-weight:750;
+  text-align:right;
+}
+.student-dashboard-summary-list > button {
+  justify-self:start;
+  margin-top:10px;
+}
 @media (max-width: 820px) {
   .student-dashboard-shell,
   .student-dashboard-lower-grid,
-  .student-dashboard-metric-row {
+  .student-dashboard-overview-grid {
     grid-template-columns:1fr;
   }
   .student-dashboard-header-meta {
@@ -3889,6 +4047,10 @@ body.dark-mode .app .bottom-nav-item.active {
   }
   .student-dashboard-quick-links {
     gap:10px;
+  }
+  .student-dashboard-next-action {
+    align-items:flex-start;
+    flex-direction:column;
   }
 }
 .admin-app .admin-dashboard .stats-grid {
@@ -14926,7 +15088,12 @@ function StudentDashboard({
   feesData,
   selectionInfo,
   scoreValues,
+  scoreRecords,
   courseProgressSummary,
+  unreadNotificationCount,
+  onOpenNotifications,
+  onOpenSelection,
+  onOpenResults,
   onOpenLearningLibrary,
   onOpenCourses,
 }) {
@@ -15004,27 +15171,14 @@ function StudentDashboard({
       attendanceMonths[monthIndex].present += 1;
     }
   });
-  const attendanceChartPoints = attendanceMonths.map((month, index) => {
-    const rate = month.total
-      ? Math.round((month.present / month.total) * 100)
-      : null;
-    return {
-      ...month,
-      rate,
-      x: 32 + (index * 536) / (attendanceMonths.length - 1),
-      y: 166 - ((rate ?? 0) / 100) * 112,
-    };
-  });
-  const recordedAttendancePoints = attendanceChartPoints.filter(
-    (point) => point.rate !== null,
-  );
-  const attendanceLinePath = recordedAttendancePoints
-    .map((point, index) => `${index ? "L" : "M"} ${point.x} ${point.y}`)
-    .join(" ");
-  const attendanceAreaPath = recordedAttendancePoints.length
-    ? `${attendanceLinePath} L ${recordedAttendancePoints[recordedAttendancePoints.length - 1].x} 178 L ${recordedAttendancePoints[0].x} 178 Z`
-    : "";
   const hasAttendanceTrend = attendanceMonths.some((month) => month.total > 0);
+  const attendanceRate = attendanceRows.length
+    ? Math.round((present / attendanceRows.length) * 100)
+    : null;
+  const latestScoreRecord = (Array.isArray(scoreRecords) ? [...scoreRecords] : [])
+    .sort((left, right) =>
+      new Date(right.created_at || 0).getTime() - new Date(left.created_at || 0).getTime(),
+    )[0] || null;
   const navVisibility = getStudentNavVisibility(cfg);
   const feesEnabled =
     navVisibility.fees &&
@@ -15053,30 +15207,17 @@ function StudentDashboard({
     progressItems: [],
   };
   const courseAverage = Math.min(100, Math.max(0, Number(courseSummary.averageCompletion) || 0));
-  const progressItems = Array.isArray(courseSummary.progressItems) && courseSummary.progressItems.length
-    ? courseSummary.progressItems.slice(0, 3)
-    : [
-        { title: "No enrolled courses", percent: 0 },
-        { title: "Start a course", percent: 0 },
-        { title: "Track progress here", percent: 0 },
-      ];
-  const dailyProgressValue = Math.min(
-    100,
-    Math.max(0, Math.round(((avg ?? courseAverage) * 0.6) + (courseAverage * 0.4))),
-  );
-  const courseCompletionValue = Math.min(
-    100,
-    Math.max(0, courseAverage || (avg ?? 0)),
-  );
-  const studyStreakText = courseSummary.enrolledCount
-    ? `${Math.max(3, Math.min(14, Math.round(courseCompletionValue / 10) + 2))} days`
-    : "0 days";
+  const allProgressItems = Array.isArray(courseSummary.progressItems)
+    ? courseSummary.progressItems
+    : [];
+  const progressItems = allProgressItems.slice(0, 3);
+  const continueCourse = allProgressItems.find((item) => Number(item.percent) < 100) || null;
   const dashboardMetrics = [
     ...(resultsEnabled
       ? [{
           label: "Current Average",
-          value: avg === null ? "N/A" : `${avg}%`,
-          sub: baseScores.length ? g.grade : "No score records",
+          value: avg === null ? "—" : `${avg}%`,
+          sub: baseScores.length ? `Grade ${g.grade}` : "No scores recorded yet",
           ic: dashboardGradeColors.icon,
           bgStart: dashboardGradeColors.start,
           bgEnd: dashboardGradeColors.end,
@@ -15087,8 +15228,10 @@ function StudentDashboard({
     ...(attendanceEnabled
       ? [{
           label: "Attendance Rate",
-          value: `${Math.round((present / Math.max(attendanceRows.length, 1)) * 100)}%`,
-          sub: `${present}/${attendanceRows.length} days`,
+          value: attendanceRate === null ? "—" : `${attendanceRate}%`,
+          sub: attendanceRows.length
+            ? `${present} of ${attendanceRows.length} recorded days`
+            : "No attendance records yet",
           ic: "#00b86b",
           bgStart: "#ecfff5",
           bgEnd: "#92f0c2",
@@ -15096,11 +15239,29 @@ function StudentDashboard({
           icon: "attendance",
         }]
       : []),
+    ...(showCourses
+      ? [{
+          label: "Course Completion",
+          value: courseSummary.enrolledCount ? `${courseAverage}%` : "—",
+          sub: courseSummary.enrolledCount
+            ? `${courseSummary.completedCount} of ${courseSummary.enrolledCount} courses complete`
+            : "No enrolled courses yet",
+          ic: "#0059ff",
+          bgStart: "#eff5ff",
+          bgEnd: "#b7d1ff",
+          text: "#0039a6",
+          icon: "docs",
+        }]
+      : []),
     ...(feesEnabled
       ? [{
           label: "Fees Status",
-          value: outstanding > 0 ? "Outstanding" : "Cleared",
-          sub: `${money.format(outstanding)} outstanding`,
+          value: feeRows.length ? (outstanding > 0 ? "Due" : "Paid") : "—",
+          sub: feeRows.length
+            ? outstanding > 0
+              ? `${money.format(outstanding)} outstanding`
+              : "No outstanding balance"
+            : "No fee records yet",
           ic: outstanding > 0 ? "#ff7a00" : "#00b86b",
           bgStart: outstanding > 0 ? "#fff4e8" : "#ecfff5",
           bgEnd: outstanding > 0 ? "#ffc47a" : "#92f0c2",
@@ -15109,30 +15270,60 @@ function StudentDashboard({
         }]
       : []),
   ];
-  const focusCards = [
-    {
-      label: "Today's focus",
-      value: showStudyContent ? "Continue your study plan" : "Review your coursework",
-      meta: showStudyContent ? "Complete one lesson and one recap task" : "Keep pace with your learning goals",
-      tone: "primary",
-    },
-    {
-      label: "Study streak",
-      value: "7-day momentum",
-      meta: "A strong routine keeps your progress moving.",
-      tone: "success",
-    },
-    {
-      label: "Next action",
-      value: selectionEnabled ? `Selection ${selectionLabel}` : "Open the course library",
-      meta: selectionEnabled
-        ? `${selectionCount} ${selectionCount === 1 ? "saved entry" : "saved entries"}`
-        : "Browse the latest lessons and resources",
-      tone: "warning",
-    },
-  ];
+  const selectionNeedsAction = selectionEnabled && selectionStatus !== "confirmed";
+  const continueCourseDescription = continueCourse?.totalLessons
+    ? `${continueCourse.completedCount} of ${continueCourse.totalLessons} lessons complete. Keep going where you left off.`
+    : `${Math.min(100, Math.max(0, Number(continueCourse?.percent) || 0))}% complete. Pick up where you left off in your courses.`;
+  const nextAction = continueCourse
+    ? {
+        eyebrow: "CONTINUE LEARNING",
+        title: continueCourse.title,
+        description: continueCourseDescription,
+        label: "Open courses",
+        action: onOpenCourses,
+      }
+    : selectionNeedsAction
+      ? {
+          eyebrow: "YOUR NEXT STEP",
+          title: selectionStatus === "submitted" || selectionStatus === "pending"
+            ? "Check your school selection"
+            : "Choose your schools",
+          description: `${selectionCount} ${selectionCount === 1 ? "school saved" : "schools saved"} so far.`,
+          label: selectionStatus === "submitted" || selectionStatus === "pending"
+            ? "View selection"
+            : "Start selection",
+          action: onOpenSelection,
+        }
+      : showCourses
+        ? {
+            eyebrow: "KEEP LEARNING",
+            title: "Explore available courses",
+            description: "Find a course and build your progress one lesson at a time.",
+            label: "Browse courses",
+            action: onOpenCourses,
+          }
+        : showStudyContent
+          ? {
+              eyebrow: "KEEP LEARNING",
+              title: "Explore study resources",
+              description: "Find lessons and materials for your next study session.",
+              label: "Open resources",
+              action: onOpenLearningLibrary,
+            }
+          : resultsEnabled
+            ? {
+                eyebrow: "YOUR ACADEMICS",
+                title: "Review your results",
+                description: "Check your latest scores and academic progress.",
+                label: "View results",
+                action: onOpenResults,
+              }
+            : null;
   const quickLinks = [
-    showCourses ? { label: "Browse courses", action: onOpenCourses, tone: "secondary" } : null,
+    showCourses ? { label: "Courses", action: onOpenCourses, tone: "secondary" } : null,
+    showStudyContent ? { label: "Study resources", action: onOpenLearningLibrary, tone: "neutral" } : null,
+    resultsEnabled ? { label: "Results", action: onOpenResults, tone: "neutral" } : null,
+    { label: unreadNotificationCount ? `Updates (${unreadNotificationCount})` : "Updates", action: onOpenNotifications, tone: "neutral" },
   ].filter(Boolean);
   return (
     <div className="fade-in admin-dashboard student-dashboard">
@@ -15174,67 +15365,185 @@ function StudentDashboard({
         </aside>
 
         <div className="student-dashboard-main-column">
-          <div className="student-dashboard-progress-row" aria-label="Daily progress overview">
-            <div className="student-dashboard-progress-card accent">
-              <span className="student-dashboard-card-kicker">DP</span>
-              <strong>Daily Progress</strong>
-              <div className="student-dashboard-progress-value">{dailyProgressValue}%</div>
-              <small>{courseSummary.enrolledCount ? "Updated from enrolled courses" : "No enrolled courses yet"}</small>
-            </div>
-            <div className="student-dashboard-progress-card">
-              <span className="student-dashboard-card-kicker">Progress</span>
-              <strong>Course completion</strong>
-              <div className="student-dashboard-progress-value">{courseCompletionValue}%</div>
-              <small>{courseSummary.enrolledCount ? `${courseSummary.enrolledCount} active course${courseSummary.enrolledCount === 1 ? "" : "s"}` : "Start a course"}</small>
-            </div>
-            <div className="student-dashboard-progress-card warm">
-              <span className="student-dashboard-card-kicker">Focus</span>
-              <strong>Study streak</strong>
-              <div className="student-dashboard-progress-value">{studyStreakText}</div>
-              <small>{courseSummary.enrolledCount ? "Consistent effort" : "Set your study rhythm"}</small>
-            </div>
-          </div>
           <div className="student-dashboard-hero-card">
             <div className="student-dashboard-header-meta">
               <DashboardDateTime />
-              <div className="admin-dashboard-period">Academic Year {cfg.academicYear}   {cfg.currentTerm}</div>
+              <div className="admin-dashboard-period">
+                Academic Year {cfg.academicYear} · {cfg.currentTerm}
+              </div>
             </div>
-
+            {nextAction && (
+              <div className="student-dashboard-next-action">
+                <div>
+                  <span className="admin-dashboard-panel-eyebrow">{nextAction.eyebrow}</span>
+                  <h2>{nextAction.title}</h2>
+                  <p>{nextAction.description}</p>
+                </div>
+                <button type="button" onClick={nextAction.action}>
+                  {nextAction.label}
+                </button>
+              </div>
+            )}
           </div>
 
-          <div className="student-dashboard-progress-panel">
-            <div className="student-dashboard-panel-heading">
-              <span className="admin-dashboard-panel-eyebrow">Progress</span>
-              <h3>Learning momentum</h3>
-            </div>
-            <div className="student-dashboard-progress-list">
-              {progressItems.map((item, index) => (
-                <div className="student-dashboard-progress-item" key={`${item.title}-${index}`}>
-                  <div className="student-dashboard-progress-copy">
-                    <span>{item.title}</span>
-                    <strong>{Math.min(100, Math.max(0, Number(item.percent) || 0))}%</strong>
-                  </div>
-                  <div className="student-dashboard-progress-bar"><i style={{ width: `${Math.min(100, Math.max(0, Number(item.percent) || 0))}%` }} /></div>
+          {dashboardMetrics.length > 0 && (
+            <div className="student-dashboard-metric-row" aria-label="Academic snapshot">
+              {dashboardMetrics.map((metric) => (
+                <div
+                  className="student-dashboard-metric-tile"
+                  key={metric.label}
+                  style={{
+                    "--dash-bg-start": metric.bgStart,
+                    "--dash-bg-end": metric.bgEnd,
+                    "--dash-text": metric.text,
+                  }}
+                >
+                  <span className="stat-icon">
+                    <Ico name={metric.icon} size={19} color={metric.ic} />
+                  </span>
+                  <span className="stat-label">{metric.label}</span>
+                  <strong className="stat-value">{metric.value}</strong>
+                  <span className="stat-sub">{metric.sub}</span>
                 </div>
               ))}
             </div>
-          </div>
+          )}
 
-          <div className="student-dashboard-lower-grid" style={{ gridTemplateColumns: "1fr" }}>
+          <section className="student-dashboard-progress-panel">
+            <div className="student-dashboard-panel-heading">
+              <div>
+                <span className="admin-dashboard-panel-eyebrow">YOUR COURSES</span>
+                <h3>Continue learning</h3>
+              </div>
+              {showCourses && (
+                <button
+                  className="student-dashboard-text-link"
+                  type="button"
+                  onClick={onOpenCourses}
+                >
+                  View all courses
+                </button>
+              )}
+            </div>
+            {progressItems.length ? (
+              <div className="student-dashboard-progress-list">
+                {progressItems.map((item, index) => (
+                  <div className="student-dashboard-progress-item" key={`${item.title}-${index}`}>
+                    <div className="student-dashboard-progress-copy">
+                      <span>{item.title}</span>
+                      <strong>{Math.min(100, Math.max(0, Number(item.percent) || 0))}%</strong>
+                    </div>
+                    <div
+                      className="student-dashboard-progress-bar"
+                      role="progressbar"
+                      aria-label={`${item.title} completion`}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={Math.min(100, Math.max(0, Number(item.percent) || 0))}
+                    >
+                      <i style={{ width: `${Math.min(100, Math.max(0, Number(item.percent) || 0))}%` }} />
+                    </div>
+                    {item.totalLessons > 0 && (
+                      <small className="student-dashboard-lesson-count">
+                        {item.completedCount} of {item.totalLessons} lessons complete
+                      </small>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="student-dashboard-empty-state">
+                <p>No enrolled courses yet. Browse courses to get started.</p>
+                {showCourses && (
+                  <button type="button" onClick={onOpenCourses}>Browse courses</button>
+                )}
+              </div>
+            )}
+          </section>
+
+          <div className={`student-dashboard-overview-grid${attendanceEnabled ? "" : " is-single"}`}>
+            {attendanceEnabled && (
+              <section className="student-dashboard-summary-panel">
+                <div className="admin-dashboard-panel-heading">
+                  <div>
+                    <span className="admin-dashboard-panel-eyebrow">LAST SIX MONTHS</span>
+                    <h3>Attendance trend</h3>
+                  </div>
+                  {attendanceRate !== null && <strong>{attendanceRate}% overall</strong>}
+                </div>
+                {hasAttendanceTrend ? (
+                  <div className="student-dashboard-attendance-chart" aria-label="Monthly attendance">
+                    {attendanceMonths.map((month) => {
+                      const rate = month.total
+                        ? Math.round((month.present / month.total) * 100)
+                        : null;
+                      return (
+                        <div className="student-dashboard-attendance-month" key={`${month.date.getFullYear()}-${month.date.getMonth()}`}>
+                          <strong>{rate === null ? "—" : `${rate}%`}</strong>
+                          <div className="student-dashboard-attendance-track">
+                            {rate !== null && (
+                              <i style={{ height: `${rate}%` }} />
+                            )}
+                          </div>
+                          <span>{month.label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="student-dashboard-empty-state">
+                    <p>No attendance records for the last six months.</p>
+                  </div>
+                )}
+              </section>
+            )}
+
             <section className="student-dashboard-summary-panel">
               <div className="admin-dashboard-panel-heading">
                 <div>
-                  <span className="admin-dashboard-panel-eyebrow">YOUR PORTAL</span>
+                  <span className="admin-dashboard-panel-eyebrow">ACADEMIC SNAPSHOT</span>
                   <h3>At a glance</h3>
                 </div>
               </div>
-              {showCourses && (
-                <div className="student-dashboard-actions">
-                  <button className="btn btn-blue" type="button" onClick={onOpenCourses}>
-                    Browse courses
-                  </button>
+              <div className="student-dashboard-summary-list">
+                {selectionEnabled && (
+                  <div>
+                    <span>School selection</span>
+                    <strong>{selectionLabel}</strong>
+                  </div>
+                )}
+                <div>
+                  <span>{latestScoreRecord ? "Latest result" : "Current period average"}</span>
+                  <strong>
+                    {latestScoreRecord
+                      ? `${Math.round(Number(latestScoreRecord.score))}% · ${latestScoreRecord.subject || latestScoreRecord.exam_type || "Assessment"}`
+                      : avg === null
+                        ? "No results recorded"
+                        : `${avg}%`}
+                  </strong>
                 </div>
-              )}
+                {courseSummary.enrolledCount > 0 && (
+                  <div>
+                    <span>Courses completed</span>
+                    <strong>{courseSummary.completedCount} of {courseSummary.enrolledCount}</strong>
+                  </div>
+                )}
+                {feesEnabled && (
+                  <div>
+                    <span>Outstanding fees</span>
+                    <strong>{feeRows.length ? money.format(outstanding) : "No records"}</strong>
+                  </div>
+                )}
+                <button
+                  className="student-dashboard-text-link"
+                  type="button"
+                  onClick={onOpenNotifications}
+                >
+                  {unreadNotificationCount
+                    ? `${unreadNotificationCount} unread update${unreadNotificationCount === 1 ? "" : "s"}`
+                    : "View campus updates"}
+                </button>
+              </div>
             </section>
           </div>
         </div>
@@ -24029,6 +24338,8 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
       return {
         title: course.title || "Course",
         percent: Math.min(100, Math.max(0, percent)),
+        completedCount,
+        totalLessons,
       };
     });
 
@@ -24041,7 +24352,7 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
       enrolledCount: progressItems.length,
       completedCount,
       averageCompletion,
-      progressItems: progressItems.slice(0, 3),
+      progressItems,
     };
   };
   const [chatUsers, setChatUsers] = useState([
@@ -24072,6 +24383,8 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
   const unreadStudentNotificationCount = studentNotifications.filter(
     (notification) => !notification.is_read,
   ).length;
+  const unreadPortalNotificationCount = unreadStudentNotificationCount
+    + socialNotifications.filter((notification) => !notification.is_read).length;
   const blockedStudentNavKeys = useMemo(() => {
     const blocked = [];
     for (const item of STUDENT_NAV) {
@@ -24750,7 +25063,12 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
             status: selectionRow?.status || "not-submitted",
           }}
           scoreValues={scoreValues}
+          scoreRecords={scoreRecords}
           courseProgressSummary={courseProgressSummary}
+          unreadNotificationCount={unreadPortalNotificationCount}
+          onOpenNotifications={openNotifications}
+          onOpenSelection={() => goTab("selection")}
+          onOpenResults={() => goTab("results")}
           onOpenLearningLibrary={() => goTab("study-content")}
           onOpenCourses={() => goTab("courses")}
         />
@@ -24922,7 +25240,7 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
         onOpenNotifications={openNotifications}
         onOpenProfile={() => goTab("profile")}
         onReloadApp={reloadApp}
-        notificationCount={notificationCount + unreadStudentNotificationCount + socialNotifications.filter((item) => !item.is_read).length}
+        notificationCount={notificationCount + unreadPortalNotificationCount}
         chatUnread={totalChatUnread}
         onOpenChat={() => goTab("chat")}
         showChat={false}

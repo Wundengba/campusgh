@@ -4,6 +4,7 @@ export function Topbar({
   user,
   onLogout,
   onMenuClick,
+  menuOpen = false,
   darkMode,
   onToggleDark,
   onOpenNotifications,
@@ -19,6 +20,16 @@ export function Topbar({
 }) {
   return (
     <header className="topbar">
+      <button
+        className="menu-btn"
+        type="button"
+        onClick={onMenuClick}
+        aria-label={menuOpen ? "Close navigation menu" : "Open navigation menu"}
+        aria-expanded={menuOpen}
+        title={menuOpen ? "Close navigation menu" : "Open navigation menu"}
+      >
+        <Ico name="menu" size={21} />
+      </button>
       <div className="topbar-left">
         <span className="topbar-name" style={{ display: "none" }}>{systemName}</span>
       </div>
@@ -26,7 +37,7 @@ export function Topbar({
         <div className="topbar-actions">
           {showChat && (
             <button className="topbar-btn desktop-only-action" onClick={onOpenChat} title="Chat">
-              <Ico name="chat" size={17} color="#fff" />
+              <Ico name="chat" size={17} />
               {chatUnread > 0 && <span className="notif-badge">{chatUnread}</span>}
             </button>
           )}
@@ -35,19 +46,19 @@ export function Topbar({
           </button>
           {showNotifications && (
             <button className="topbar-btn desktop-only-action bell-mobile-visible" onClick={onOpenNotifications} title="Notifications">
-              <Ico name="bell" size={17} color="#fff" />
+              <Ico name="bell" size={17} />
               {notificationCount > 0 && <span className="notif-badge">{notificationCount}</span>}
             </button>
           )}
           <button className="topbar-btn" onClick={onToggleDark} title={darkMode ? "Light Mode" : "Dark Mode"}>
-            <Ico name={darkMode ? "sun" : "moon"} size={17} color="#fff" />
+            <Ico name={darkMode ? "sun" : "moon"} size={17} />
           </button>
           {showProfile && (
             <button className="topbar-btn" onClick={onOpenProfile} title="Profile">
-              <Ico name="profile" size={17} color="#fff" />
+              <Ico name="profile" size={17} />
             </button>
           )}
-          <button className="topbar-btn" onClick={onLogout} title="Logout"><Ico name="logout" size={17} color="#fff" /></button>
+          <button className="topbar-btn" onClick={onLogout} title="Logout"><Ico name="logout" size={17} /></button>
         </div>
       </div>
     </header>

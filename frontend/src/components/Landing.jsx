@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Ico } from "./Ico.jsx";
+import { LegalDocuments } from "./LegalDocuments.jsx";
 import "./Landing.css";
 
 const StudentSignup = lazy(() =>
@@ -58,18 +59,24 @@ export function Landing({ onSelect, onCreateAccount }) {
 
   const handle = async (event) => {
     event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const submittedEmail = String(formData.get("email") ?? email).trim();
+    const submittedStudentId = String(formData.get("studentIndex") ?? studentIndex)
+      .trim()
+      .toUpperCase();
+    const submittedPassword = String(formData.get("password") ?? pwd);
     const normalizedStudentId =
-      mode === "student" ? studentIndex.trim().toUpperCase() : "";
+      mode === "student" ? submittedStudentId : "";
     if (mode === "student") {
       if (!/^(?:CG-[A-Z]{2}\d{9,}|CG-\d{10}|\d{12})$/.test(normalizedStudentId)) {
         setErr("Enter your region-based CG- Student ID or your legacy 12-digit ID.");
         return;
       }
-      if (!pwd) {
+      if (!submittedPassword) {
         setErr("Enter your password.");
         return;
       }
-    } else if (!email || !pwd) {
+    } else if (!submittedEmail || !submittedPassword) {
       setErr("Please fill in both fields.");
       return;
     }
@@ -77,7 +84,7 @@ export function Landing({ onSelect, onCreateAccount }) {
     setLoading(true);
     try {
       if (mode === "student") {
-        const result = await onSelect(mode, { index: normalizedStudentId }, pwd);
+        const result = await onSelect(mode, { index: normalizedStudentId }, submittedPassword);
         if (!result?.ok) setErr(result?.error || "Student sign in failed.");
         return;
       }
@@ -85,9 +92,9 @@ export function Landing({ onSelect, onCreateAccount }) {
       const payloadUser = {
         name: "Admin User",
         role: mode,
-        email,
+        email: submittedEmail,
       };
-      const result = await onSelect(mode, payloadUser, pwd);
+      const result = await onSelect(mode, payloadUser, submittedPassword);
       if (!result?.ok) {
         const rawErr = String(result?.error || "");
         const authErr = rawErr.toLowerCase().includes("invalid login credentials")
@@ -104,6 +111,40 @@ export function Landing({ onSelect, onCreateAccount }) {
 
   return (
     <div className={`landing${signupMode ? " landing-signup" : ""}`}>
+      {!signupMode && (
+        <aside className="landing-desktop-intro" aria-label="Campus Ghana learning and community">
+          <div className="landing-desktop-intro-content">
+            <p className="landing-desktop-eyebrow">LEARN · GROW · BELONG</p>
+            <h1>Learn, grow, and connect on campus.</h1>
+            <p className="landing-desktop-description">
+              Find study resources, follow your academic progress, and connect with your school community — all in one place.
+            </p>
+            <ol className="landing-desktop-benefits">
+              <li>
+                <span className="landing-benefit-number">01</span>
+                <span>
+                  <strong>Build your knowledge</strong>
+                  <span>Courses, study materials, and exam preparation</span>
+                </span>
+              </li>
+              <li>
+                <span className="landing-benefit-number">02</span>
+                <span>
+                  <strong>Track your progress</strong>
+                  <span>Academic results, attendance, and course progress</span>
+                </span>
+              </li>
+              <li>
+                <span className="landing-benefit-number">03</span>
+                <span>
+                  <strong>Find your community</strong>
+                  <span>Student profiles, social feeds, groups, and study teams</span>
+                </span>
+              </li>
+            </ol>
+          </div>
+        </aside>
+      )}
       <div className={`landing-box${signupMode ? " signup-box" : ""}`}>
         <div className="brand-mark">
           <div className="landing-logo"><img src="https://image2url.com/r2/default/images/1773576400522-25d9d22b-3e79-4a9a-adc2-eae0031fbfe1.png" alt="Campus Ghana" /></div>
@@ -167,6 +208,7 @@ export function Landing({ onSelect, onCreateAccount }) {
             <span className="auth-input-icon"><Ico name={mode === "student" ? "profile" : "email"} size={18} color="#64748b" /></span>
             <input
               className="form-input"
+              name={mode === "student" ? "studentIndex" : "email"}
               type={mode === "student" ? "text" : "email"}
               placeholder={mode === "student" ? "CG-AS011126001" : "Staff email"}
               aria-label={mode === "student" ? "Student ID" : "Staff email"}
@@ -183,6 +225,7 @@ export function Landing({ onSelect, onCreateAccount }) {
             <span className="auth-input-icon"><Ico name="lock" size={18} color="#64748b" /></span>
             <input
               className="form-input"
+              name="password"
               type={showPwd ? "text" : "password"}
               data-has-toggle="true"
               placeholder="Password"
@@ -231,6 +274,7 @@ export function Landing({ onSelect, onCreateAccount }) {
         )}
           </>
         )}
+        <LegalDocuments />
         <div className="landing-footer">LEARN | IMPROVE | ACHIEVE</div>
       </div>
     </div>

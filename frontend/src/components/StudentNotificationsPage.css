@@ -1,0 +1,445 @@
+.student-notifications-page {
+  display: grid;
+  width: min(100%, 980px);
+  gap: 18px;
+  margin: 0 auto;
+  padding: clamp(18px, 3vw, 32px);
+}
+
+.student-notifications-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #e3ebe5;
+}
+
+.student-notifications-back {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  place-items: center;
+  border: 1px solid #dfe7e1;
+  border-radius: 50%;
+  color: #355342;
+  background: #fff;
+  cursor: pointer;
+}
+
+.student-notifications-back:hover {
+  background: #f0f7f1;
+}
+
+.student-notifications-back:focus-visible,
+.student-notifications-controls > button:focus-visible,
+.student-notification-card:focus-visible {
+  outline: 2px solid #448858;
+  outline-offset: 3px;
+}
+
+.student-notifications-heading {
+  min-width: 0;
+  flex: 1;
+}
+
+.student-notifications-heading > span,
+.student-campus-announcements-heading > div > span {
+  color: #6a8571;
+  font-size: .67rem;
+  font-weight: 800;
+  letter-spacing: .12em;
+}
+
+.student-notifications-heading h1 {
+  margin: 4px 0 5px;
+  color: #20362a;
+  font-size: clamp(1.45rem, 3vw, 1.9rem);
+  font-weight: 780;
+  letter-spacing: -.035em;
+}
+
+.student-notifications-heading p {
+  margin: 0;
+  color: #68786d;
+  font-size: .86rem;
+  line-height: 1.5;
+}
+
+.student-notifications-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.student-notifications-unread-count {
+  padding: 6px 10px;
+  border: 1px solid #d7e8dc;
+  border-radius: 999px;
+  color: #28603b;
+  background: #eff7f1;
+  font-size: .73rem;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.student-notifications-controls > button {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid #d7e1d9;
+  border-radius: 9px;
+  color: #355342;
+  background: #fff;
+  font: inherit;
+  font-size: .75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.student-notifications-controls > button:hover:not(:disabled) {
+  border-color: #9abda2;
+  background: #f3f8f4;
+}
+
+.student-notifications-controls > button:disabled {
+  opacity: .48;
+  cursor: default;
+}
+
+.student-notifications-error {
+  margin: 0;
+  padding: 11px 13px;
+  border: 1px solid #ead8ad;
+  border-radius: 10px;
+  color: #735417;
+  background: #fff9e9;
+  font-size: .78rem;
+  line-height: 1.5;
+}
+
+.student-notifications-list {
+  display: grid;
+  gap: 10px;
+}
+
+.student-notification-card {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 9px;
+  align-items: start;
+  gap: 14px;
+  width: 100%;
+  min-height: 84px;
+  padding: 15px 16px;
+  border: 1px solid #e3ebe5;
+  border-radius: 15px;
+  color: #25372c;
+  background: #fff;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
+}
+
+.student-notification-card:not(.is-read) {
+  border-color: #d3e7d8;
+  background: linear-gradient(110deg, #f3faf5, #fff 62%);
+}
+
+.student-notification-card:hover {
+  border-color: #a9cbb1;
+  box-shadow: 0 7px 20px rgba(28, 62, 39, .08);
+}
+
+.student-notifications-avatar {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  overflow: hidden;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background: #327b4c;
+  box-shadow: 0 1px 5px rgba(19, 34, 25, .16);
+  font-size: .72rem;
+  font-weight: 800;
+}
+
+.student-notifications-avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+  object-position: center;
+}
+
+.student-notifications-system-avatar {
+  color: #36784a;
+  background: #e3f1e7;
+  box-shadow: none;
+}
+
+.student-notification-copy {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.student-notification-message {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  font-size: .82rem;
+  line-height: 1.45;
+}
+
+.student-notification-message > strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #203b2a;
+  font-weight: 780;
+}
+
+.student-notification-message .student-verified-badge {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
+  margin: 0;
+  vertical-align: middle;
+}
+
+.student-notification-preview {
+  overflow-wrap: anywhere;
+  color: #43584a;
+  font-size: .78rem;
+  line-height: 1.5;
+}
+
+.student-notification-context,
+.student-notification-copy time {
+  color: #728078;
+  font-size: .7rem;
+  line-height: 1.45;
+}
+
+.student-notification-dot {
+  width: 9px;
+  height: 9px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: #2f8d4a;
+}
+
+.student-notifications-empty {
+  display: grid;
+  justify-items: center;
+  gap: 9px;
+  min-height: 210px;
+  padding: 34px 20px;
+  border: 1px dashed #cfded2;
+  border-radius: 18px;
+  background: linear-gradient(145deg, #f8fbf8, #f1f7f2);
+  text-align: center;
+}
+
+.student-notifications-empty > span {
+  display: grid;
+  width: 54px;
+  height: 54px;
+  place-items: center;
+  border-radius: 17px;
+  color: #36784a;
+  background: #e3f1e7;
+}
+
+.student-notifications-empty h2 {
+  margin: 5px 0 0;
+  color: #294333;
+  font-size: 1rem;
+}
+
+.student-notifications-empty p {
+  max-width: 390px;
+  margin: 0;
+  color: #718077;
+  font-size: .82rem;
+  line-height: 1.55;
+}
+
+.student-campus-announcements {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 18px;
+  border-top: 1px solid #e3ebe5;
+}
+
+.student-campus-announcements-heading h2 {
+  margin: 5px 0 0;
+  color: #294333;
+  font-size: 1.08rem;
+}
+
+.student-campus-announcement {
+  padding: 16px;
+  border: 1px solid #e3ebe5;
+  border-left: 4px solid #5b9c68;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.student-campus-announcement.is-approved {
+  border-left-color: #20935a;
+  background: #f2faf4;
+}
+
+.student-campus-announcement > strong {
+  color: #294333;
+  font-size: .84rem;
+}
+
+.student-campus-announcement > p {
+  margin: 6px 0;
+  color: #566a5d;
+  font-size: .8rem;
+  line-height: 1.5;
+}
+
+.student-campus-announcement > time {
+  color: #7a8a7f;
+  font-size: .7rem;
+}
+
+body.dark-mode .student-notifications-header,
+body.dark-mode .student-campus-announcements {
+  border-color: #33443a;
+}
+
+body.dark-mode .student-notifications-heading h1,
+body.dark-mode .student-campus-announcements-heading h2,
+body.dark-mode .student-campus-announcement > strong {
+  color: #e4eee6;
+}
+
+body.dark-mode .student-notifications-heading p,
+body.dark-mode .student-notification-context,
+body.dark-mode .student-notification-copy time,
+body.dark-mode .student-campus-announcement > time {
+  color: #aab8ad;
+}
+
+body.dark-mode .student-notifications-back,
+body.dark-mode .student-notifications-controls > button {
+  border-color: #3d5143;
+  color: #d4e4d7;
+  background: #1d2821;
+}
+
+body.dark-mode .student-notifications-back:hover,
+body.dark-mode .student-notifications-controls > button:hover:not(:disabled) {
+  border-color: #678a6e;
+  background: #26382a;
+}
+
+body.dark-mode .student-notifications-unread-count {
+  border-color: #3b5b43;
+  color: #b7e0be;
+  background: #1d3022;
+}
+
+body.dark-mode .student-notifications-error {
+  border-color: #655431;
+  color: #ead9a6;
+  background: #302918;
+}
+
+body.dark-mode .student-notification-card {
+  border-color: #34463a;
+  color: #dce8df;
+  background: #1a241d;
+}
+
+body.dark-mode .student-notification-card:not(.is-read) {
+  border-color: #42604a;
+  background: linear-gradient(110deg, #203526, #1a241d 70%);
+}
+
+body.dark-mode .student-notification-card:hover {
+  border-color: #62856a;
+}
+
+body.dark-mode .student-notification-message > strong,
+body.dark-mode .student-notification-preview {
+  color: #d1e2d5;
+}
+
+body.dark-mode .student-notifications-empty,
+body.dark-mode .student-campus-announcement {
+  border-color: #43584a;
+  background: linear-gradient(145deg, #1d2b22, #17231d);
+}
+
+body.dark-mode .student-campus-announcement.is-approved {
+  background: #1d3024;
+}
+
+body.dark-mode .student-notifications-empty > span {
+  color: #a7d4ad;
+  background: #2a4331;
+}
+
+body.dark-mode .student-notifications-empty h2 {
+  color: #d7e5d9;
+}
+
+body.dark-mode .student-notifications-empty p,
+body.dark-mode .student-campus-announcement > p {
+  color: #aab8ad;
+}
+
+@media (max-width: 640px) {
+  .student-notifications-page {
+    gap: 14px;
+    padding: 18px 13px 28px;
+  }
+
+  .student-notifications-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding-bottom: 15px;
+  }
+
+  .student-notifications-back {
+    width: 36px;
+    height: 36px;
+    flex-basis: 36px;
+  }
+
+  .student-notifications-heading {
+    flex: 1 1 calc(100% - 52px);
+  }
+
+  .student-notifications-controls {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .student-notification-card {
+    grid-template-columns: 38px minmax(0, 1fr) 8px;
+    gap: 10px;
+    min-height: 76px;
+    padding: 12px;
+    border-radius: 12px;
+  }
+
+  .student-notifications-avatar {
+    width: 38px;
+    height: 38px;
+    flex-basis: 38px;
+  }
+}

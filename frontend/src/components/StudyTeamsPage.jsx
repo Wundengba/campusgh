@@ -109,7 +109,12 @@ function MemberAvatar({ src, name, className = "" }) {
   );
 }
 
-export default function StudyTeamsPage({ user, studentData }) {
+export default function StudyTeamsPage({
+  user,
+  studentData,
+  messageTarget,
+  onMessageTargetHandled,
+}) {
   const actorRole = String(user?.role || "").toLowerCase();
   const isStudent = actorRole === "student";
   const canCreateTeams = [
@@ -163,6 +168,7 @@ export default function StudyTeamsPage({ user, studentData }) {
   const recordingSecondsRef = useRef(0);
   const discardVoiceRef = useRef(false);
   const hasInitializedTeamSelectionRef = useRef(false);
+  const handledMessageTargetRef = useRef("");
   const fileInputRef = useRef(null);
   const resourceDetailsRef = useRef(null);
 
@@ -565,6 +571,17 @@ export default function StudyTeamsPage({ user, studentData }) {
       setBusy(false);
     }
   };
+
+  useEffect(() => {
+    const memberId = String(messageTarget?.user_id || "");
+    if (!memberId) {
+      handledMessageTargetRef.current = "";
+      return;
+    }
+    if (handledMessageTargetRef.current === memberId) return;
+    handledMessageTargetRef.current = memberId;
+    void startDirectChat(messageTarget).finally(() => onMessageTargetHandled?.());
+  }, [messageTarget, onMessageTargetHandled, startDirectChat]);
 
   const stopVoiceRecording = () => {
     const recorder = voiceRecorderRef.current;

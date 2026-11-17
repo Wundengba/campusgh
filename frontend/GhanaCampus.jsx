@@ -3,6 +3,8 @@ import { supabase } from "./src/lib/supabaseClient.js";
 import { extractDocumentText, getDocumentTitle } from "./src/utils/documentImport.js";
 import { Ico } from "./src/components/Ico.jsx";
 import { Topbar } from "./src/components/Topbar.jsx";
+import { StudentVerifiedBadge } from "./src/components/StudentVerifiedBadge.jsx";
+import polishedTheme from "./src/styles/polishedTheme.css?inline";
 import { SettingsContext } from "./src/context/SettingsContext.js";
 import { useIsMobileLayout } from "./src/hooks/useIsMobileLayout.js";
 import { useStudentPortalRecords } from "./src/hooks/useStudentPortalRecords.js";
@@ -14917,29 +14919,6 @@ function GradingPage() {
 }
 
 //   STUDENT DASHBOARD
-function StudentVerifiedBadge() {
-  return (
-    <svg
-      className="student-verified-badge"
-      viewBox="0 0 20 20"
-      role="img"
-      aria-label="Verified student"
-      focusable="false"
-    >
-      <title>Verified student</title>
-      <circle cx="10" cy="10" r="9" fill="#1877f2" />
-      <path
-        d="m5.8 10.1 2.7 2.6 5.8-5.7"
-        fill="none"
-        stroke="#fff"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
 function StudentDashboard({
   user,
   studentData,
@@ -15067,7 +15046,6 @@ function StudentDashboard({
   const attendanceEnabled = navVisibility.attendance;
   const showCourses = navVisibility.courses;
   const showStudyContent = navVisibility["study-content"];
-  const showAnnouncements = navVisibility.announcements;
   const courseSummary = courseProgressSummary || {
     enrolledCount: 0,
     completedCount: 0,
@@ -15154,9 +15132,7 @@ function StudentDashboard({
     },
   ];
   const quickLinks = [
-    showStudyContent ? { label: "Study library", action: onOpenLearningLibrary, tone: "primary" } : null,
     showCourses ? { label: "Browse courses", action: onOpenCourses, tone: "secondary" } : null,
-    showAnnouncements ? { label: "Announcements", action: () => {}, tone: "neutral" } : null,
   ].filter(Boolean);
   return (
     <div className="fade-in admin-dashboard student-dashboard">
@@ -15178,34 +15154,7 @@ function StudentDashboard({
           </div>
 
           <div className="student-dashboard-profile-meta">
-            Student ID: {student.index || "-"}   {student.class || "-"}   {student.region || "-"} Region
-          </div>
-
-          {selectionEnabled && cfg.studentSelectionDeadlineVisible !== false && cfg.selectionDeadline && (
-            <div className="student-dashboard-profile-deadline">
-              Selection Deadline: {cfg.selectionDeadline}
-            </div>
-          )}
-
-          <div className="student-dashboard-mini-grid">
-            {resultsEnabled && (
-              <div className="student-dashboard-mini-item">
-                <span>Current average</span>
-                <strong>{avg === null ? "N/A" : `${avg}%`}</strong>
-              </div>
-            )}
-            {attendanceEnabled && (
-              <div className="student-dashboard-mini-item">
-                <span>Attendance</span>
-                <strong>{present}/{attendanceRows.length || 0}</strong>
-              </div>
-            )}
-            {feesEnabled && (
-              <div className="student-dashboard-mini-item">
-                <span>Fees</span>
-                <strong>{money.format(outstanding)}</strong>
-              </div>
-            )}
+            Student ID: {student.index || "-"}
           </div>
 
           {quickLinks.length > 0 && (
@@ -15251,29 +15200,6 @@ function StudentDashboard({
               <div className="admin-dashboard-period">Academic Year {cfg.academicYear}   {cfg.currentTerm}</div>
             </div>
 
-            {dashboardMetrics.length > 0 && (
-              <div className="student-dashboard-metric-row">
-                {dashboardMetrics.map((s) => (
-                  <div
-                    key={s.label}
-                    className="student-dashboard-metric-tile"
-                    style={{
-                      "--dash-bg-start": s.bgStart,
-                      "--dash-bg-end": s.bgEnd,
-                      "--dash-accent": s.ic,
-                      "--dash-text": s.text,
-                    }}
-                  >
-                    <div className="stat-icon">
-                      <Ico name={s.icon} size={18} color={s.ic} />
-                    </div>
-                    <div className="stat-label">{s.label}</div>
-                    <div className="stat-value">{s.value}</div>
-                    <div className="stat-sub">{s.sub}</div>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
 
           <div className="student-dashboard-progress-panel">
@@ -15294,7 +15220,7 @@ function StudentDashboard({
             </div>
           </div>
 
-          <div className="student-dashboard-lower-grid">
+          <div className="student-dashboard-lower-grid" style={{ gridTemplateColumns: "1fr" }}>
             <section className="student-dashboard-summary-panel">
               <div className="admin-dashboard-panel-heading">
                 <div>
@@ -15302,62 +15228,14 @@ function StudentDashboard({
                   <h3>At a glance</h3>
                 </div>
               </div>
-              <div className="student-dashboard-snapshot-list">
-                {resultsEnabled && (
-                  <div className="student-dashboard-snapshot-row">
-                    <span>Current average</span>
-                    <strong>{avg === null ? "No scores" : `${avg}%`}</strong>
-                  </div>
-                )}
-                {attendanceEnabled && (
-                  <div className="student-dashboard-snapshot-row">
-                    <span>Attendance</span>
-                    <strong>{present} of {attendanceRows.length} days</strong>
-                  </div>
-                )}
-                {selectionEnabled && (
-                  <div className="student-dashboard-snapshot-row">
-                    <span>School selection</span>
-                    <strong>{selectionLabel}   {selectionCount}</strong>
-                  </div>
-                )}
-                {feesEnabled && (
-                  <div className="student-dashboard-snapshot-row">
-                    <span>Fees outstanding</span>
-                    <strong>{money.format(outstanding)}</strong>
-                  </div>
-                )}
-              </div>
-              {(showCourses || showStudyContent) && (
+              {showCourses && (
                 <div className="student-dashboard-actions">
-                  {showCourses && (
-                    <button className="btn btn-blue" type="button" onClick={onOpenCourses}>
-                      Browse courses
-                    </button>
-                  )}
-                  {showStudyContent && (
-                    <button className="btn btn-outline" type="button" onClick={onOpenLearningLibrary}>
-                      Study library
-                    </button>
-                  )}
+                  <button className="btn btn-blue" type="button" onClick={onOpenCourses}>
+                    Browse courses
+                  </button>
                 </div>
               )}
             </section>
-
-            {showAnnouncements && (
-              <section className="student-dashboard-news-panel">
-                <div className="admin-dashboard-panel-heading">
-                  <div>
-                    <span className="admin-dashboard-panel-eyebrow">UPDATES</span>
-                    <h3>Latest notice</h3>
-                  </div>
-                </div>
-                <div className="student-dashboard-news-box">
-                  <strong>{ANNOUNCEMENTS[0]?.title}</strong>
-                  <p>{ANNOUNCEMENTS[0]?.body}</p>
-                </div>
-              </section>
-            )}
           </div>
         </div>
       </div>
@@ -15370,6 +15248,12 @@ const StudentProfile = lazy(() =>
   import("./src/components/StudentProfilePage.jsx").then((module) => ({
     default: module.StudentProfile,
   })),
+);
+const CampusSocialPage = lazy(() =>
+  import("./src/components/CampusSocialPage.jsx"),
+);
+const StudentNotificationsPage = lazy(() =>
+  import("./src/components/StudentNotificationsPage.jsx"),
 );
 
 //   STUDENT ATTENDANCE
@@ -21106,35 +20990,19 @@ const STUDENT_NAV = [
   { key: "dashboard", icon: "dashboard", label: "Dashboard", color: "#6366f1" },
   { key: "profile", icon: "profile", label: "Profile", color: "#3b82f6" },
   { section: "Academics" },
-  { key: "results", icon: "analytics", label: "Results", color: "#f97316" },
-  { key: "report-card", icon: "results", label: "Report Card", color: "#7c3aed" },
-  { key: "exam-schedule", icon: "events", label: "Exam Schedule", color: "#0369a1" },
-  { key: "live-tests", icon: "quiz", label: "Quizzes & Tests", color: "#f59e0b" },
-  { key: "study-content", icon: "docs", label: "Study Materials", color: "#10b981" },
   { key: "courses", icon: "docs", label: "Courses", color: "#0891b2" },
+  { key: "social", icon: "profile", label: "Social", color: "#0f766e" },
   { key: "study-teams", icon: "chat", label: "Study Teams", color: "#7c3aed" },
-  { section: "Mock Placement" },
-  { key: "selection", icon: "selection", label: "Select Schools", color: "#06b6d4" },
-  { key: "my-selection", icon: "confirmed", label: "My Selection", color: "#16a34a" },
-  { section: "Student Services" },
-  { key: "attendance", icon: "attendance", label: "Attendance", color: "#14b8a6" },
-  { key: "fees", icon: "fees", label: "Fees", color: "#22c55e" },
-  { key: "pay-fees", icon: "fees", label: "Pay Fees", color: "#15803d" },
   { section: "Communication & Resources" },
-  { key: "announcements", icon: "bell", label: "Announcements", color: "#ef4444" },
+  { key: "announcements", icon: "bell", label: "Notifications", color: "#16834a" },
   { key: "support-tickets", icon: "support", label: "Support", color: "#0f766e" },
-  { key: "chat", icon: "chat", label: "Chat", color: "#10b981" },
-  { key: "docs", icon: "docs", label: "Documents", color: "#f97316" },
-  { key: "upload-docs", icon: "enroll", label: "Upload Documents", color: "#7c2d12" },
-  { key: "assignments", icon: "docs", label: "Assignments", color: "#1d4ed8" },
-  { key: "resources", icon: "docs", label: "Resources", color: "#475569" },
 ];
 
 const STUDENT_SUBPAGE_MAP = {
   results: ["report-card", "exam-schedule"],
   selection: ["my-selection"],
   fees: ["pay-fees"],
-  announcements: ["support-tickets", "chat"],
+  announcements: ["chat"],
   docs: ["upload-docs"],
   "study-content": ["assignments", "resources"],
 };
@@ -22261,6 +22129,7 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
         user={user}
         onLogout={onLogout}
         onMenuClick={() => setSidebarOpen((o) => !o)}
+        menuOpen={sidebarOpen}
         darkMode={darkMode}
         onToggleDark={onToggleDark}
         onOpenNotifications={openNotifications}
@@ -23400,6 +23269,7 @@ function SchoolAdminPortal({ user, onLogout, darkMode, onToggleDark }) {
         user={user}
         onLogout={onLogout}
         onMenuClick={() => setSidebarOpen((o) => !o)}
+        menuOpen={sidebarOpen}
         darkMode={darkMode}
         onToggleDark={onToggleDark}
         onOpenNotifications={() => setNotificationCount(0)}
@@ -24084,6 +23954,7 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
     readAvailableTab(STUDENT_TAB_KEY, STUDENT_NAV),
   );
   const mainContentRef = useRef(null);
+  const notificationReturnTabRef = useRef("dashboard");
   useEffect(() => {
     mainContentRef.current?.scrollTo({ top: 0, behavior: "auto" });
   }, [tab]);
@@ -24093,6 +23964,11 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
   const [studentNotificationsError, setStudentNotificationsError] = useState("");
   const [schoolsData, setSchoolsData] = useState(SCHOOLS_DATA);
   const [studentData, setStudentData] = useState(null);
+  const [socialMemberToOpen, setSocialMemberToOpen] = useState(null);
+  const [socialNotifications, setSocialNotifications] = useState([]);
+  const [socialNotificationsError, setSocialNotificationsError] = useState("");
+  const [socialNotificationToOpen, setSocialNotificationToOpen] = useState(null);
+  const [socialMessageTarget, setSocialMessageTarget] = useState(null);
   const [attendanceData, setAttendanceData] = useState([]);
   const [feesData, setFeesData] = useState([]);
   const [courseProgressSummary, setCourseProgressSummary] = useState({
@@ -24224,9 +24100,10 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
   const BOTTOM = useMemo(
     () =>
       getPriorityBottomKeys(
-        ["dashboard", "study-content", "live-tests", "results", "fees"],
+        ["dashboard", "courses", "profile", "social"],
         filteredStudentNav,
         new Set(blockedStudentNavKeys),
+        4,
       ),
     [filteredStudentNav, blockedStudentNavKeys],
   );
@@ -24271,6 +24148,9 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
   ]);
 
   const goTab = (key, closeSidebar = true) => {
+    if (key === "announcements" && tab !== "announcements") {
+      notificationReturnTabRef.current = tab;
+    }
     setTab(key);
     writeStoredTab(STUDENT_TAB_KEY, key);
     if (closeSidebar) setSidebarOpen(false);
@@ -24626,7 +24506,7 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
       .subscribe((status) => {
         if (status === "CHANNEL_ERROR") {
           setStudentNotificationsError(
-            "Live profile updates are unavailable. Refresh Announcements to check for new updates.",
+            "Live profile updates are unavailable. Refresh Notifications to check for new updates.",
           );
         }
       });
@@ -24636,47 +24516,6 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
       void supabase.removeChannel(channel);
     };
   }, [user?.id]);
-
-  useEffect(() => {
-    if (tab !== "announcements" || !supabase || !user?.id) return;
-    const unreadIds = studentNotifications
-      .filter((notification) => !notification.is_read)
-      .map((notification) => notification.id);
-    if (!unreadIds.length) return;
-
-    let active = true;
-    supabase
-      .from("student_notifications")
-      .update({ is_read: true })
-      .in("id", unreadIds)
-      .then(({ error }) => {
-        if (!active) return;
-        if (error) {
-          setStudentNotificationsError(
-            `Profile updates could not be marked as read: ${error.message}`,
-          );
-          return;
-        }
-        setStudentNotifications((current) =>
-          current.map((notification) =>
-            unreadIds.includes(notification.id)
-              ? { ...notification, is_read: true }
-              : notification,
-          ),
-        );
-      })
-      .catch((error) => {
-        if (active) {
-          setStudentNotificationsError(
-              `Profile updates could not be marked as read: ${error?.message || "Supabase request failed."}`,
-          );
-        }
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [studentNotifications, tab, user?.id]);
 
   useEffect(() => {
     if (tab === "my-selection") {
@@ -24717,6 +24556,176 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
     }
   }, [markSelectionApprovalSeen, tab]);
 
+  useEffect(() => {
+    if (!supabase || !user?.id || isPreviewStudentUser(user.id)) {
+      setSocialNotifications([]);
+      setSocialNotificationsError("");
+      return undefined;
+    }
+
+    let active = true;
+    setSocialNotifications([]);
+    setSocialNotificationsError("");
+    const loadNotifications = async () => {
+      let migrationWarning = "";
+      let { data, error } = await supabase
+        .from("campus_social_notifications")
+        .select("id, actor_id, actor_name, post_id, comment_id, parent_comment_id, comment_preview, event_type, reaction_type, post_preview, is_read, created_at")
+        .eq("recipient_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(50);
+      if (error && /comment_id|parent_comment_id|comment_preview/i.test(error.message || "")) {
+        const legacyResult = await supabase
+          .from("campus_social_notifications")
+          .select("id, actor_id, actor_name, post_id, event_type, reaction_type, post_preview, is_read, created_at")
+          .eq("recipient_id", user.id)
+          .order("created_at", { ascending: false })
+          .limit(50);
+        data = legacyResult.data;
+        error = legacyResult.error;
+        if (!error) {
+          migrationWarning = "Reply and comment-reaction notifications need database migration 055.";
+        }
+      }
+      if (!active) return;
+      if (error) {
+        setSocialNotificationsError(
+          "Social notifications need database migration 042 and an active database connection.",
+        );
+        return;
+      }
+      setSocialNotifications(data || []);
+      setSocialNotificationsError(migrationWarning);
+    };
+
+    loadNotifications().catch((error) => {
+      if (active) {
+        setSocialNotificationsError(
+          `Social notifications could not be loaded: ${error?.message || "Supabase request failed."}`,
+        );
+      }
+    });
+
+    const channel = supabase
+      .channel(`student-social-notifications-${user.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "campus_social_notifications",
+          filter: `recipient_id=eq.${user.id}`,
+        },
+        (payload) => {
+          if (!payload.new) return;
+          setSocialNotifications((current) =>
+            current.some((item) => item.id === payload.new.id)
+              ? current
+              : [payload.new, ...current].slice(0, 50),
+          );
+        },
+      )
+      .subscribe((status) => {
+        if (status === "CHANNEL_ERROR") {
+          setSocialNotificationsError(
+            "Live social notifications are unavailable. Refresh Notifications to check for new activity.",
+          );
+        }
+      });
+
+    return () => {
+      active = false;
+      void supabase.removeChannel(channel);
+    };
+  }, [user?.id]);
+
+  const markStudentNotificationRead = async (notification) => {
+    if (notification.is_read || !supabase || !user?.id) return;
+    const { error } = await supabase
+      .from("student_notifications")
+      .update({ is_read: true })
+      .eq("id", notification.id)
+      .eq("student_id", user.id);
+    if (error) {
+      setStudentNotificationsError(`Profile update could not be marked as read: ${error.message}`);
+      return;
+    }
+    setStudentNotifications((current) => current.map((item) =>
+      item.id === notification.id ? { ...item, is_read: true } : item,
+    ));
+  };
+
+  const markSocialNotificationRead = async (notification) => {
+    if (notification.is_read || !supabase || !user?.id) return true;
+    const { error } = await supabase
+      .from("campus_social_notifications")
+      .update({ is_read: true })
+      .eq("id", notification.id)
+      .eq("recipient_id", user.id);
+    if (error) {
+      setSocialNotificationsError(`Social activity could not be marked as read: ${error.message}`);
+      return false;
+    }
+    setSocialNotifications((current) => current.map((item) =>
+      item.id === notification.id ? { ...item, is_read: true } : item,
+    ));
+    return true;
+  };
+
+  const openSocialNotification = async (notification) => {
+    const markedRead = await markSocialNotificationRead(notification);
+    if (!markedRead || notification.event_type === "report_finalized" || !notification.post_id) {
+      return;
+    }
+    setSocialNotificationToOpen({ ...notification, requestKey: Date.now() });
+    goTab("social");
+  };
+
+  const markAllNotificationsRead = async () => {
+    if (!supabase || !user?.id) return;
+    const unreadStudentIds = studentNotifications
+      .filter((notification) => !notification.is_read)
+      .map((notification) => notification.id);
+    const unreadSocialIds = socialNotifications
+      .filter((notification) => !notification.is_read)
+      .map((notification) => notification.id);
+    if (!unreadStudentIds.length && !unreadSocialIds.length) return;
+
+    const [studentResult, socialResult] = await Promise.all([
+      unreadStudentIds.length
+        ? supabase.from("student_notifications")
+          .update({ is_read: true })
+          .in("id", unreadStudentIds)
+          .eq("student_id", user.id)
+        : Promise.resolve({ error: null }),
+      unreadSocialIds.length
+        ? supabase.from("campus_social_notifications")
+          .update({ is_read: true })
+          .eq("recipient_id", user.id)
+          .in("id", unreadSocialIds)
+        : Promise.resolve({ error: null }),
+    ]);
+
+    if (studentResult.error) {
+      setStudentNotificationsError(`Profile updates could not be marked as read: ${studentResult.error.message}`);
+    } else if (unreadStudentIds.length) {
+      setStudentNotifications((current) => current.map((notification) =>
+        unreadStudentIds.includes(notification.id)
+          ? { ...notification, is_read: true }
+          : notification,
+      ));
+    }
+    if (socialResult.error) {
+      setSocialNotificationsError(`Social activity could not be marked as read: ${socialResult.error.message}`);
+    } else if (unreadSocialIds.length) {
+      setSocialNotifications((current) => current.map((notification) =>
+        unreadSocialIds.includes(notification.id)
+          ? { ...notification, is_read: true }
+          : notification,
+      ));
+    }
+  };
+
   const openNotifications = () => {
     markSelectionApprovalSeen();
     goTab("announcements");
@@ -24751,6 +24760,10 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
           <StudentProfile
             user={user}
             studentData={studentData}
+            onOpenSocialMemberProfile={(member) => {
+              setSocialMemberToOpen(member);
+              goTab("social");
+            }}
             onProfileUpdated={(updatedProfile) =>
               setStudentData((current) => ({ ...current, ...updatedProfile }))
             }
@@ -24769,97 +24782,50 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
           <CoursesPage mode="student" studentData={studentData} />
         </Suspense>
       ),
+      social: (
+        <Suspense fallback={<div className="portal-loading" role="status">Loading Campus Social...</div>}>
+          <CampusSocialPage
+            user={user}
+            studentData={studentData}
+            onOpenStudentProfile={() => goTab("profile")}
+            onMessageStudent={(member) => {
+              setSocialMessageTarget(member);
+              goTab("study-teams");
+            }}
+            memberToOpen={socialMemberToOpen}
+            onMemberProfileOpened={() => setSocialMemberToOpen(null)}
+            socialNotificationToOpen={socialNotificationToOpen}
+          />
+        </Suspense>
+      ),
       "study-teams": (
         <Suspense fallback={<div className="portal-loading" role="status">Loading study teams...</div>}>
-          <StudyTeamsPage user={user} studentData={studentData} />
+          <StudyTeamsPage
+            user={user}
+            studentData={studentData}
+            messageTarget={socialMessageTarget}
+            onMessageTargetHandled={() => setSocialMessageTarget(null)}
+          />
         </Suspense>
       ),
       attendance: <StudentAttendance attendanceData={attendanceData} />,
       fees: <StudentFees feesData={feesData} />,
       docs: <DocumentsPage />,
       announcements: (
-        <div className="fade-in">
-          <div className="page-header">
-            <div className="page-title">Announcements</div>
-            <div className="page-sub">
-              Notification channels: {appCfg.emailNotifs ? "Email " : ""}
-              {appCfg.smsNotifs ? "SMS" : "In-app"}
-            </div>
-          </div>
-          {studentNotificationsError && (
-            <div className="alert alert-danger" role="alert">
-              {studentNotificationsError}
-            </div>
-          )}
-          {studentNotifications.map((notification) => (
-            <div
-              key={notification.id}
-              className="card card-padded"
-              style={{
-                marginBottom: 12,
-                borderLeft: "4px solid #16a34a",
-                background: notification.is_read ? undefined : "#f0fdf4",
-              }}
-            >
-              <div style={{ fontWeight: 700, marginBottom: 4 }}>
-                {notification.title}
-              </div>
-              <div style={{ color: "#475569", fontSize: ".9rem" }}>
-                {notification.message}
-              </div>
-              <div style={{ fontSize: ".78rem", color: "#94a3b8", marginTop: 6 }}>
-                {new Date(notification.created_at).toLocaleString()}
-              </div>
-            </div>
-          ))}
-          {approvalInfo.isApproved && (
-            <div
-              className="card card-padded"
-              style={{
-                marginBottom: 12,
-                borderLeft: "4px solid #16a34a",
-                background: "#f0fdf4",
-              }}
-            >
-              <div
-                style={{ fontWeight: 800, marginBottom: 4, color: "#14532d" }}
-              >
-                Selection Approved
-              </div>
-              <div style={{ color: "#166534", fontSize: ".9rem" }}>
-                Your selected schools have been approved by the admin and
-                placement processing can continue.
-              </div>
-              {approvalInfo.approvedAtLabel && (
-                <div
-                  style={{ fontSize: ".78rem", color: "#166534", marginTop: 6 }}
-                >
-                  Approved: {approvalInfo.approvedAtLabel}
-                </div>
-              )}
-            </div>
-          )}
-          {ANNOUNCEMENTS.map((a) => (
-            <div
-              key={a.id}
-              className={`card card-padded ${a.type === "urgent" ? "" : ""}`}
-              style={{
-                marginBottom: 12,
-                borderLeft: `4px solid ${a.type === "urgent" ? "#dc2626" : a.type === "info" ? "#1a56db" : "#d97706"}`,
-              }}
-            >
-              <div style={{ fontWeight: 700, marginBottom: 4 }}>{a.title}</div>
-              <div style={{ color: "#475569", fontSize: ".9rem" }}>
-                {a.body}
-              </div>
-              <div
-                style={{ fontSize: ".78rem", color: "#94a3b8", marginTop: 6 }}
-              >
-                {a.date}
-              </div>
-            </div>
-          ))}
-        </div>
+        <Suspense fallback={<div className="portal-loading" role="status">Loading notifications...</div>}>
+          <StudentNotificationsPage
+            studentNotifications={studentNotifications}
+            studentNotificationsError={studentNotificationsError}
+            socialNotifications={socialNotifications}
+            socialNotificationsError={socialNotificationsError}
+            campusAnnouncements={ANNOUNCEMENTS}
+            selectionNotice={approvalInfo.isApproved ? approvalInfo : null}
+            onBack={() => goTab(notificationReturnTabRef.current || "dashboard")}
+            onMarkStudentNotificationRead={markStudentNotificationRead}
+            onOpenSocialNotification={openSocialNotification}
+            onMarkAllRead={markAllNotificationsRead}
+          />
+        </Suspense>
       ),
       selection: (
         <SchoolSelection schoolsData={schoolsData} studentData={studentData} />
@@ -24950,16 +24916,17 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
         user={user}
         onLogout={onLogout}
         onMenuClick={() => setSidebarOpen((o) => !o)}
+        menuOpen={sidebarOpen}
         darkMode={darkMode}
         onToggleDark={onToggleDark}
         onOpenNotifications={openNotifications}
         onOpenProfile={() => goTab("profile")}
         onReloadApp={reloadApp}
-        notificationCount={notificationCount + unreadStudentNotificationCount}
+        notificationCount={notificationCount + unreadStudentNotificationCount + socialNotifications.filter((item) => !item.is_read).length}
         chatUnread={totalChatUnread}
         onOpenChat={() => goTab("chat")}
-        showChat={studentNavVisibility.chat}
-        showNotifications={studentNavVisibility.announcements}
+        showChat={false}
+        showNotifications
         showProfile={studentNavVisibility.profile}
         systemName={appCfg.systemName}
       />
@@ -25505,6 +25472,7 @@ function GhanaCampus() {
       value={{ session, cfg: appSettings, updateCfg: setAppSettings }}
     >
       <style>{css}</style>
+      <style>{polishedTheme}</style>
       {authLoading ? (
         <div className="portal-loading" role="status">
           <div className="loading-spinner" />
@@ -25961,7 +25929,8 @@ function ParentPortal({ user, onLogout, darkMode, onToggleDark }) {
         onLogout={onLogout}
         darkMode={darkMode}
         onToggleDark={onToggleDark}
-        onMenuClick={() => setSidebarOpen(true)}
+        onMenuClick={() => setSidebarOpen((open) => !open)}
+        menuOpen={sidebarOpen}
       />
 
       <div className="portal-main">

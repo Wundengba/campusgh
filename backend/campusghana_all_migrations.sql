@@ -3356,3 +3356,817 @@ create policy "Students can reset their lesson progress" on public.course_lesson
     )
   );
 -- END SOURCE: 032_courses_and_enrollment.sql
+
+-- BEGIN SOURCE: 056_course_quiz_attempts.sql
+alter table public.course_lesson_progress
+  add column if not exists quiz_passed boolean not null default false;
+
+grant update on public.course_lesson_progress to authenticated;
+
+drop policy if exists "Students can track their lesson progress" on public.course_lesson_progress;
+create policy "Students can track their lesson progress" on public.course_lesson_progress
+  for insert to authenticated
+  with check (
+    quiz_passed = true
+    and exists (
+      select 1
+      from public.course_enrollments enrollment
+      join public.courses on courses.id = enrollment.course_id
+      where enrollment.id = course_lesson_progress.enrollment_id
+        and enrollment.student_id = public.current_student_record_id()
+        and courses.is_published = true
+    )
+  );
+
+drop policy if exists "Students can update their quiz-passed lesson progress" on public.course_lesson_progress;
+create policy "Students can update their quiz-passed lesson progress" on public.course_lesson_progress
+  for update to authenticated
+  using (
+    exists (
+      select 1
+      from public.course_enrollments enrollment
+      where enrollment.id = course_lesson_progress.enrollment_id
+        and enrollment.student_id = public.current_student_record_id()
+    )
+  )
+  with check (
+    quiz_passed = true
+    and exists (
+      select 1
+      from public.course_enrollments enrollment
+      join public.courses on courses.id = enrollment.course_id
+      where enrollment.id = course_lesson_progress.enrollment_id
+        and enrollment.student_id = public.current_student_record_id()
+        and courses.is_published = true
+    )
+  );
+
+create table if not exists public.course_quiz_attempts (
+  id uuid primary key default gen_random_uuid(),
+  student_id uuid not null references public.students(id) on delete cascade,
+  enrollment_id uuid not null references public.course_enrollments(id) on delete cascade,
+  course_id uuid not null references public.courses(id) on delete cascade,
+  lesson_id text not null,
+  course_title text not null,
+  lesson_title text not null,
+  correct_count integer not null check (correct_count >= 0),
+  total_questions integer not null check (total_questions > 0),
+  percentage integer not null check (percentage between 0 and 100),
+  created_at timestamptz not null default now(),
+  check (correct_count <= total_questions)
+);
+
+create index if not exists course_quiz_attempts_student_created_idx
+  on public.course_quiz_attempts (student_id, created_at desc);
+
+revoke all on public.course_quiz_attempts from public, anon;
+grant select, insert on public.course_quiz_attempts to authenticated;
+
+alter table public.course_quiz_attempts enable row level security;
+
+drop policy if exists "Students can view their course quiz attempts" on public.course_quiz_attempts;
+create policy "Students can view their course quiz attempts" on public.course_quiz_attempts
+  for select to authenticated
+  using (student_id = public.current_student_record_id());
+
+drop policy if exists "Students can save their course quiz attempts" on public.course_quiz_attempts;
+create policy "Students can save their course quiz attempts" on public.course_quiz_attempts
+  for insert to authenticated
+  with check (
+    student_id = public.current_student_record_id()
+    and exists (
+      select 1
+      from public.course_enrollments enrollment
+      join public.courses on courses.id = enrollment.course_id
+      where enrollment.id = course_quiz_attempts.enrollment_id
+        and enrollment.course_id = course_quiz_attempts.course_id
+        and enrollment.student_id = course_quiz_attempts.student_id
+        and courses.is_published = true
+    )
+  );
+notify pgrst, 'reload schema';
+-- END SOURCE: 056_course_quiz_attempts.sql
+-- START SOURCE: 057_study_chats_without_teams.sql
+create or replace function public.start_collaborative_study_direct_conversation(
+  p_other_user_id uuid
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  actor_id uuid := auth.uid();
+  first_user uuid;
+  second_user uuid;
+  conversation_id uuid;
+begin
+  if actor_id is null or p_other_user_id is null or actor_id = p_other_user_id then
+    raise exception 'Choose another signed-in member to start a chat.'
+      using errcode = '22023';
+  end if;
+
+  first_user := least(actor_id, p_other_user_id);
+  second_user := greatest(actor_id, p_other_user_id);
+
+  insert into public.collaborative_study_direct_conversations (
+    participant_one, participant_two, created_by
+  )
+  values (first_user, second_user, actor_id)
+  on conflict (participant_one, participant_two) do nothing;
+
+  select conversation.id
+    into conversation_id
+    from public.collaborative_study_direct_conversations as conversation
+   where conversation.participant_one = first_user
+     and conversation.participant_two = second_user;
+
+  return conversation_id;
+end;
+$$;
+
+revoke all on function public.start_collaborative_study_direct_conversation(uuid)
+  from public, anon;
+grant execute on function public.start_collaborative_study_direct_conversation(uuid)
+  to authenticated;
+-- END SOURCE: 057_study_chats_without_teams.sql
+-- BEGIN SOURCE: 058_course_quiz_resits.sql
+alter table public.course_quiz_attempts
+  add column if not exists attempt_type text not null default 'initial';
+
+alter table public.course_quiz_attempts
+  add column if not exists resit_of_attempt_id uuid
+  references public.course_quiz_attempts(id) on delete cascade;
+
+alter table public.course_quiz_attempts
+  add constraint course_quiz_attempts_resit_shape_check
+  check (
+    attempt_type in ('initial', 'resit')
+    and (
+      (attempt_type = 'initial' and resit_of_attempt_id is null)
+      or (attempt_type = 'resit' and resit_of_attempt_id is not null)
+    )
+  );
+
+create unique index if not exists course_quiz_attempts_one_resit_per_initial_idx
+  on public.course_quiz_attempts (resit_of_attempt_id)
+  where resit_of_attempt_id is not null;
+
+drop policy if exists "Students can save their course quiz attempts"
+  on public.course_quiz_attempts;
+create policy "Students can save their course quiz attempts"
+  on public.course_quiz_attempts
+  for insert to authenticated
+  with check (
+    student_id = public.current_student_record_id()
+    and exists (
+      select 1
+      from public.course_enrollments enrollment
+      join public.courses on courses.id = enrollment.course_id
+      where enrollment.id = course_quiz_attempts.enrollment_id
+        and enrollment.course_id = course_quiz_attempts.course_id
+        and enrollment.student_id = course_quiz_attempts.student_id
+        and courses.is_published = true
+    )
+    and (
+      (attempt_type = 'initial' and resit_of_attempt_id is null)
+      or (
+        attempt_type = 'resit'
+        and exists (
+          select 1
+          from public.course_quiz_attempts initial_attempt
+          where initial_attempt.id = course_quiz_attempts.resit_of_attempt_id
+            and initial_attempt.attempt_type = 'initial'
+            and initial_attempt.student_id = course_quiz_attempts.student_id
+            and initial_attempt.enrollment_id = course_quiz_attempts.enrollment_id
+            and initial_attempt.course_id = course_quiz_attempts.course_id
+            and initial_attempt.lesson_id = course_quiz_attempts.lesson_id
+            and course_quiz_attempts.total_questions <= initial_attempt.total_questions
+        )
+      )
+    )
+  );
+
+notify pgrst, 'reload schema';
+-- END SOURCE: 058_course_quiz_resits.sql
+
+-- BEGIN SOURCE: 059_course_learning_experience.sql
+alter table public.courses
+  add column if not exists due_at timestamptz,
+  add column if not exists prerequisites uuid[] not null default '{}';
+
+create or replace function public.enforce_course_enrollment_prerequisites()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  prerequisite_course_id uuid;
+  prerequisite_lesson_count integer;
+  completed_lesson_count integer;
+begin
+  for prerequisite_course_id in
+    select unnest(courses.prerequisites)
+    from public.courses
+    where courses.id = new.course_id
+  loop
+    select count(*) into prerequisite_lesson_count
+    from public.courses prerequisite_course
+    cross join lateral jsonb_array_elements(prerequisite_course.lessons) as lesson(value)
+    where prerequisite_course.id = prerequisite_course_id
+      and nullif(lesson.value->>'id', '') is not null;
+
+    select count(distinct progress.lesson_id) into completed_lesson_count
+    from public.course_enrollments prerequisite_enrollment
+    join public.course_lesson_progress progress
+      on progress.enrollment_id = prerequisite_enrollment.id
+    join public.courses prerequisite_course
+      on prerequisite_course.id = prerequisite_course_id
+    cross join lateral jsonb_array_elements(prerequisite_course.lessons) as lesson(value)
+    where prerequisite_enrollment.student_id = new.student_id
+      and prerequisite_enrollment.course_id = prerequisite_course_id
+      and progress.quiz_passed = true
+      and lesson.value->>'id' = progress.lesson_id;
+
+    if prerequisite_lesson_count = 0
+      or completed_lesson_count < prerequisite_lesson_count then
+      raise exception 'Complete all prerequisite courses before enrolling.'
+        using errcode = '23514';
+    end if;
+  end loop;
+
+  return new;
+end;
+$$;
+
+revoke all on function public.enforce_course_enrollment_prerequisites()
+  from public, anon, authenticated;
+
+drop trigger if exists enforce_course_enrollment_prerequisites
+  on public.course_enrollments;
+create trigger enforce_course_enrollment_prerequisites
+  before insert on public.course_enrollments
+  for each row
+  execute function public.enforce_course_enrollment_prerequisites();
+
+drop policy if exists "Course staff can view course enrollments"
+  on public.course_enrollments;
+create policy "Course staff can view course enrollments"
+  on public.course_enrollments for select to authenticated
+  using (
+    exists (
+      select 1 from public.profiles
+      where profiles.id = auth.uid()
+        and profiles.role in ('admin', 'super_admin', 'teacher', 'school_admin', 'staff')
+    )
+  );
+
+create table if not exists public.course_learning_state (
+  enrollment_id uuid primary key
+    references public.course_enrollments(id) on delete cascade,
+  last_lesson_id text,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.course_learning_state enable row level security;
+revoke all on public.course_learning_state from public, anon;
+grant select, insert, update, delete on public.course_learning_state to authenticated;
+
+drop policy if exists "Students can view their course learning state"
+  on public.course_learning_state;
+create policy "Students can view their course learning state"
+  on public.course_learning_state for select to authenticated
+  using (
+    exists (
+      select 1 from public.course_enrollments enrollment
+      where enrollment.id = course_learning_state.enrollment_id
+        and enrollment.student_id = public.current_student_record_id()
+    )
+  );
+
+drop policy if exists "Students can manage their course learning state"
+  on public.course_learning_state;
+create policy "Students can manage their course learning state"
+  on public.course_learning_state for all to authenticated
+  using (
+    exists (
+      select 1 from public.course_enrollments enrollment
+      where enrollment.id = course_learning_state.enrollment_id
+        and enrollment.student_id = public.current_student_record_id()
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.course_enrollments enrollment
+      where enrollment.id = course_learning_state.enrollment_id
+        and enrollment.student_id = public.current_student_record_id()
+    )
+  );
+
+create table if not exists public.course_lesson_notes (
+  enrollment_id uuid not null
+    references public.course_enrollments(id) on delete cascade,
+  lesson_id text not null,
+  note text not null default '' check (char_length(note) <= 5000),
+  bookmarked boolean not null default false,
+  updated_at timestamptz not null default now(),
+  primary key (enrollment_id, lesson_id)
+);
+
+alter table public.course_lesson_notes enable row level security;
+revoke all on public.course_lesson_notes from public, anon;
+grant select, insert, update, delete on public.course_lesson_notes to authenticated;
+
+drop policy if exists "Students can manage their course lesson notes"
+  on public.course_lesson_notes;
+create policy "Students can manage their course lesson notes"
+  on public.course_lesson_notes for all to authenticated
+  using (
+    exists (
+      select 1 from public.course_enrollments enrollment
+      where enrollment.id = course_lesson_notes.enrollment_id
+        and enrollment.student_id = public.current_student_record_id()
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.course_enrollments enrollment
+      join public.courses on courses.id = enrollment.course_id
+      where enrollment.id = course_lesson_notes.enrollment_id
+        and enrollment.student_id = public.current_student_record_id()
+        and courses.is_published = true
+    )
+  );
+
+create table if not exists public.course_certificates (
+  id uuid primary key default gen_random_uuid(),
+  enrollment_id uuid not null unique
+    references public.course_enrollments(id) on delete cascade,
+  student_id uuid not null references public.students(id) on delete cascade,
+  course_id uuid not null references public.courses(id) on delete cascade,
+  course_title text not null,
+  issued_at timestamptz not null default now()
+);
+
+create index if not exists course_certificates_student_issued_idx
+  on public.course_certificates (student_id, issued_at desc);
+
+alter table public.course_certificates enable row level security;
+revoke all on public.course_certificates from public, anon, authenticated;
+grant select on public.course_certificates to authenticated;
+
+drop policy if exists "Students can view their course certificates"
+  on public.course_certificates;
+create policy "Students can view their course certificates"
+  on public.course_certificates for select to authenticated
+  using (student_id = public.current_student_record_id());
+
+drop policy if exists "Course staff can view course certificates"
+  on public.course_certificates;
+create policy "Course staff can view course certificates"
+  on public.course_certificates for select to authenticated
+  using (
+    exists (
+      select 1 from public.profiles
+      where profiles.id = auth.uid()
+        and profiles.role in ('admin', 'super_admin', 'teacher', 'school_admin', 'staff')
+    )
+  );
+
+create or replace function public.issue_course_completion_certificate(p_enrollment_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  enrollment_row public.course_enrollments%rowtype;
+  course_row public.courses%rowtype;
+  total_lessons integer;
+  completed_lessons integer;
+begin
+  select * into enrollment_row
+  from public.course_enrollments
+  where id = p_enrollment_id;
+
+  if not found then
+    return;
+  end if;
+
+  select * into course_row
+  from public.courses
+  where id = enrollment_row.course_id;
+
+  if not found then
+    return;
+  end if;
+
+  select count(*) into total_lessons
+  from jsonb_array_elements(course_row.lessons) as lesson(value)
+  where nullif(lesson.value->>'id', '') is not null;
+
+  if total_lessons = 0 then
+    return;
+  end if;
+
+  select count(distinct progress.lesson_id) into completed_lessons
+  from public.course_lesson_progress progress
+  join lateral jsonb_array_elements(course_row.lessons) as lesson(value)
+    on lesson.value->>'id' = progress.lesson_id
+  where progress.enrollment_id = p_enrollment_id
+    and progress.quiz_passed = true;
+
+  if completed_lessons = total_lessons then
+    insert into public.course_certificates (
+      enrollment_id, student_id, course_id, course_title
+    )
+    values (
+      enrollment_row.id, enrollment_row.student_id, course_row.id, course_row.title
+    )
+    on conflict (enrollment_id) do nothing;
+  end if;
+end;
+$$;
+
+revoke all on function public.issue_course_completion_certificate(uuid)
+  from public, anon, authenticated;
+
+create or replace function public.issue_course_completion_certificate_after_progress()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  if new.quiz_passed then
+    perform public.issue_course_completion_certificate(new.enrollment_id);
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function public.issue_course_completion_certificate_after_progress()
+  from public, anon, authenticated;
+
+drop trigger if exists course_completion_certificate_after_progress
+  on public.course_lesson_progress;
+create trigger course_completion_certificate_after_progress
+  after insert or update of quiz_passed on public.course_lesson_progress
+  for each row
+  execute function public.issue_course_completion_certificate_after_progress();
+
+do $$
+declare
+  enrollment_record record;
+begin
+  for enrollment_record in
+    select id from public.course_enrollments
+  loop
+    perform public.issue_course_completion_certificate(enrollment_record.id);
+  end loop;
+end;
+$$;
+
+create table if not exists public.course_discussions (
+  id uuid primary key default gen_random_uuid(),
+  course_id uuid not null references public.courses(id) on delete cascade,
+  lesson_id text not null,
+  author_id uuid not null references auth.users(id) on delete cascade,
+  parent_id uuid references public.course_discussions(id) on delete cascade,
+  body text not null check (char_length(btrim(body)) between 1 and 3000),
+  is_hidden boolean not null default false,
+  created_at timestamptz not null default now(),
+  check (parent_id is null or parent_id <> id)
+);
+
+create index if not exists course_discussions_lesson_created_idx
+  on public.course_discussions (course_id, lesson_id, created_at);
+
+alter table public.course_discussions enable row level security;
+revoke all on public.course_discussions from public, anon, authenticated;
+grant select, insert, update (is_hidden) on public.course_discussions to authenticated;
+
+drop policy if exists "Course members can view visible discussions"
+  on public.course_discussions;
+create policy "Course members can view visible discussions"
+  on public.course_discussions for select to authenticated
+  using (
+    exists (
+      select 1 from public.profiles
+      where profiles.id = auth.uid()
+        and profiles.role in ('admin', 'super_admin', 'teacher', 'school_admin', 'staff')
+    )
+    or (
+      not is_hidden
+      and exists (
+        select 1 from public.course_enrollments enrollment
+        where enrollment.course_id = course_discussions.course_id
+          and enrollment.student_id = public.current_student_record_id()
+      )
+    )
+  );
+
+create or replace function public.course_discussion_parent_is_valid(
+  p_parent_id uuid,
+  p_course_id uuid,
+  p_lesson_id text
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select exists (
+    select 1
+    from public.course_discussions parent
+    where parent.id = p_parent_id
+      and parent.course_id = p_course_id
+      and parent.lesson_id = p_lesson_id
+      and parent.parent_id is null
+      and parent.is_hidden = false
+  );
+$$;
+
+revoke all on function public.course_discussion_parent_is_valid(uuid, uuid, text)
+  from public, anon, authenticated;
+grant execute on function public.course_discussion_parent_is_valid(uuid, uuid, text)
+  to authenticated;
+
+drop policy if exists "Enrolled students and course staff can post discussions"
+  on public.course_discussions;
+create policy "Enrolled students and course staff can post discussions"
+  on public.course_discussions for insert to authenticated
+  with check (
+    author_id = auth.uid()
+    and exists (
+      select 1
+      from public.courses
+      join lateral jsonb_array_elements(courses.lessons) as lesson(value) on true
+      where courses.id = course_discussions.course_id
+        and lesson.value->>'id' = course_discussions.lesson_id
+        and (
+          courses.is_published = true
+          or exists (
+            select 1 from public.profiles
+            where profiles.id = auth.uid()
+              and profiles.role in ('admin', 'super_admin', 'teacher', 'school_admin', 'staff')
+          )
+        )
+    )
+    and (
+      exists (
+        select 1 from public.profiles
+        where profiles.id = auth.uid()
+          and profiles.role in ('admin', 'super_admin', 'teacher', 'school_admin', 'staff')
+      )
+      or (
+        exists (
+          select 1 from public.course_enrollments enrollment
+          where enrollment.course_id = course_discussions.course_id
+            and enrollment.student_id = public.current_student_record_id()
+        )
+        and (
+          parent_id is null
+          or public.course_discussion_parent_is_valid(
+            course_discussions.parent_id,
+            course_discussions.course_id,
+            course_discussions.lesson_id
+          )
+        )
+      )
+    )
+  );
+
+drop policy if exists "Course staff can moderate discussions"
+  on public.course_discussions;
+create policy "Course staff can moderate discussions"
+  on public.course_discussions for update to authenticated
+  using (
+    exists (
+      select 1 from public.profiles
+      where profiles.id = auth.uid()
+        and profiles.role in ('admin', 'super_admin', 'teacher', 'school_admin', 'staff')
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.profiles
+      where profiles.id = auth.uid()
+        and profiles.role in ('admin', 'super_admin', 'teacher', 'school_admin', 'staff')
+    )
+  );
+
+drop policy if exists "Course staff can view all lesson progress"
+  on public.course_lesson_progress;
+create policy "Course staff can view all lesson progress"
+  on public.course_lesson_progress for select to authenticated
+  using (
+    exists (
+      select 1
+      from public.course_enrollments enrollment
+      join public.profiles on profiles.id = auth.uid()
+      where enrollment.id = course_lesson_progress.enrollment_id
+        and profiles.role in ('admin', 'super_admin', 'teacher', 'school_admin', 'staff')
+    )
+  );
+
+drop policy if exists "Course staff can view all quiz attempts"
+  on public.course_quiz_attempts;
+create policy "Course staff can view all quiz attempts"
+  on public.course_quiz_attempts for select to authenticated
+  using (
+    exists (
+      select 1
+      from public.profiles
+      where profiles.id = auth.uid()
+        and profiles.role in ('admin', 'super_admin', 'teacher', 'school_admin', 'staff')
+    )
+  );
+
+notify pgrst, 'reload schema';
+-- END SOURCE: 059_course_learning_experience.sql
+-- BEGIN SOURCE: 060_fix_course_discussion_rls_recursion.sql
+create or replace function public.course_discussion_parent_is_valid(
+  p_parent_id uuid,
+  p_course_id uuid,
+  p_lesson_id text
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select exists (
+    select 1
+    from public.course_discussions parent
+    where parent.id = p_parent_id
+      and parent.course_id = p_course_id
+      and parent.lesson_id = p_lesson_id
+      and parent.parent_id is null
+      and parent.is_hidden = false
+  );
+$$;
+
+revoke all on function public.course_discussion_parent_is_valid(uuid, uuid, text)
+  from public, anon, authenticated;
+grant execute on function public.course_discussion_parent_is_valid(uuid, uuid, text)
+  to authenticated;
+
+drop policy if exists "Enrolled students and course staff can post discussions"
+  on public.course_discussions;
+create policy "Enrolled students and course staff can post discussions"
+  on public.course_discussions for insert to authenticated
+  with check (
+    author_id = auth.uid()
+    and exists (
+      select 1
+      from public.courses
+      join lateral jsonb_array_elements(courses.lessons) as lesson(value) on true
+      where courses.id = course_discussions.course_id
+        and lesson.value->>'id' = course_discussions.lesson_id
+        and (
+          courses.is_published = true
+          or exists (
+            select 1 from public.profiles
+            where profiles.id = auth.uid()
+              and profiles.role in ('admin', 'super_admin', 'teacher', 'school_admin', 'staff')
+          )
+        )
+    )
+    and (
+      exists (
+        select 1 from public.profiles
+        where profiles.id = auth.uid()
+          and profiles.role in ('admin', 'super_admin', 'teacher', 'school_admin', 'staff')
+      )
+      or (
+        exists (
+          select 1 from public.course_enrollments enrollment
+          where enrollment.course_id = course_discussions.course_id
+            and enrollment.student_id = public.current_student_record_id()
+        )
+        and (
+          parent_id is null
+          or public.course_discussion_parent_is_valid(
+            course_discussions.parent_id,
+            course_discussions.course_id,
+            course_discussions.lesson_id
+          )
+        )
+      )
+    )
+  );
+
+notify pgrst, 'reload schema';
+-- END SOURCE: 060_fix_course_discussion_rls_recursion.sql
+
+-- BEGIN SOURCE: 061_course_discussion_author_names.sql
+create or replace function public.get_course_discussion_author_names(
+  p_course_id uuid,
+  p_author_ids uuid[]
+)
+returns table (author_id uuid, display_name text)
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  course_staff boolean;
+  course_member boolean;
+begin
+  if auth.uid() is null then
+    raise exception 'Sign in to view course discussion authors.'
+      using errcode = '42501';
+  end if;
+
+  select exists (
+    select 1
+    from public.profiles
+    where id = auth.uid()
+      and role in ('admin', 'super_admin', 'teacher', 'school_admin', 'staff')
+  ) into course_staff;
+
+  select exists (
+    select 1
+    from public.course_enrollments
+    where course_id = p_course_id
+      and student_id = public.current_student_record_id()
+  ) into course_member;
+
+  if not course_staff and not course_member then
+    raise exception 'You must be enrolled in this course to view discussion authors.'
+      using errcode = '42501';
+  end if;
+
+  if cardinality(coalesce(p_author_ids, '{}'::uuid[])) > 500 then
+    raise exception 'Too many discussion authors were requested.'
+      using errcode = '22023';
+  end if;
+
+  return query
+  select author_row.id,
+         coalesce(
+           nullif(btrim(profile.display_name), ''),
+           nullif(btrim(student.display_name), ''),
+           nullif(btrim(profile.full_name), ''),
+           nullif(btrim(student.full_name), ''),
+           case when author_row.id = auth.uid() then 'You' else 'Course member' end
+         )
+    from (
+      select distinct discussion.author_id as id
+      from public.course_discussions discussion
+      where discussion.course_id = p_course_id
+        and discussion.author_id = any(coalesce(p_author_ids, '{}'::uuid[]))
+        and (
+          course_staff
+          or (
+            not discussion.is_hidden
+            and (
+              discussion.parent_id is null
+              or exists (
+                select 1
+                from public.course_discussions parent
+                where parent.id = discussion.parent_id
+                  and parent.course_id = discussion.course_id
+                  and not parent.is_hidden
+              )
+            )
+          )
+        )
+    ) author_row
+    left join public.profiles profile on profile.id = author_row.id
+    left join public.students student on student.auth_user_id = author_row.id;
+end;
+$$;
+
+revoke all on function public.get_course_discussion_author_names(uuid, uuid[])
+  from public, anon, authenticated;
+grant execute on function public.get_course_discussion_author_names(uuid, uuid[])
+  to authenticated;
+
+notify pgrst, 'reload schema';
+-- END SOURCE: 061_course_discussion_author_names.sql
+
+-- BEGIN SOURCE: 062_course_discussion_message_deletion.sql
+grant delete on public.course_discussions to authenticated;
+
+drop policy if exists "Authors and course staff can delete discussions"
+  on public.course_discussions;
+create policy "Authors and course staff can delete discussions"
+  on public.course_discussions for delete to authenticated
+  using (
+    author_id = auth.uid()
+    or exists (
+      select 1
+      from public.profiles
+      where profiles.id = auth.uid()
+        and profiles.role in ('admin', 'super_admin', 'teacher', 'school_admin', 'staff')
+    )
+  );
+
+notify pgrst, 'reload schema';
+-- END SOURCE: 062_course_discussion_message_deletion.sql

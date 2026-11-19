@@ -163,6 +163,19 @@
 }
 .campus-social-post-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .campus-social-post-head > .campus-social-avatar { flex-shrink: 0; }
+.campus-social-post-head > .campus-social-profile-avatar-link {
+  display: grid;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+}
+.campus-social-post-head > .campus-social-profile-avatar-link:focus-visible {
+  outline: 2px solid var(--social-green);
+  outline-offset: 3px;
+}
 .campus-social-post-author { display: grid; flex: 1; gap: 0; min-width: 0; }
 .campus-social-post-author strong { font-size: .88rem; line-height: 1.2; }
 .campus-social-post-author span { color: var(--social-muted); font-size: .72rem; line-height: 1.2; overflow-wrap: anywhere; }
@@ -3021,8 +3034,8 @@ body.dark-mode .campus-social-home-screen .campus-social-notification-trigger {
   width: 82px;
   height: 82px;
   flex: 0 0 82px;
-  border: 3px solid #fff;
-  box-shadow: 0 5px 16px rgba(48, 62, 93, .16);
+  border: 0;
+  box-shadow: none;
 }
 
 .campus-social-member-profile-identity > div:last-child {
@@ -3371,8 +3384,8 @@ body.dark-mode .campus-social-member-network-profile { color: #eeeaf6; }
 .campus-social-page .campus-social-member-profile-summary > .campus-social-avatar-large {
   width: 82px;
   height: 82px;
-  border: 3px solid #fff;
-  box-shadow: 0 5px 16px rgba(48, 62, 93, .16);
+  border: 0;
+  box-shadow: none;
 }
 
 .campus-social-member-profile-stats {
@@ -3462,9 +3475,6 @@ body.dark-mode .campus-social-member-network-profile { color: #eeeaf6; }
 
 body.dark-mode .campus-social-member-profile-toolbar { color: #eeeaf6; }
 body.dark-mode .campus-social-member-profile-toolbar > button:hover { background: #302d38; }
-body.dark-mode .campus-social-page .campus-social-member-profile-summary > .campus-social-avatar-large {
-  border-color: #211f28;
-}
 body.dark-mode .campus-social-member-profile-message {
   border-color: #494552;
   color: #e6e1ed;
@@ -3747,6 +3757,7 @@ body.dark-mode .campus-social-page .campus-social-comments .campus-social-commen
   background: transparent;
 }
 body.dark-mode .campus-social-page .campus-social-comments .campus-social-comment strong { color: #b7d9be; }
+body.dark-mode .campus-social-comment-time { color: #aab8ad; }
 body.dark-mode .campus-social-page .campus-social-comments .campus-social-comment-actions button { color: #a7baab; }
 body.dark-mode .campus-social-page .campus-social-comments .campus-social-comment-actions button.is-active { color: #8cdda3; }
 body.dark-mode .campus-social-comments-empty { color: #adbfaf; border-left-color: #496d50; }
@@ -3838,12 +3849,26 @@ body.dark-mode .campus-social-page .campus-social-member-profile-identity .campu
   margin-top: 1px;
 }
 
-.campus-social-page .campus-social-comments .campus-social-comment > strong,
+.campus-social-page .campus-social-comments .campus-social-comment > .campus-social-comment-meta,
 .campus-social-page .campus-social-comments .campus-social-comment > span,
 .campus-social-page .campus-social-comments .campus-social-comment-actions,
 .campus-social-page .campus-social-comments .campus-social-comment-replies-toggle,
 .campus-social-page .campus-social-comments .campus-social-reply-form {
   grid-column: 2;
+}
+
+.campus-social-comment-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px 8px;
+  min-width: 0;
+}
+
+.campus-social-comment-time {
+  color: #728078;
+  font-size: .68rem;
+  font-weight: 500;
 }
 
 .campus-social-page .campus-social-comment-replies {
@@ -4086,7 +4111,7 @@ body.dark-mode .campus-social-full-post-content .campus-social-post-media {
   border: 0;
   border-radius: 50%;
   background: #e8eee9;
-  box-shadow: 0 1px 5px rgba(19, 34, 25, .16);
+  box-shadow: none;
 }
 
 .campus-social-page .campus-social-avatar img {
@@ -4327,7 +4352,7 @@ body.dark-mode .campus-social-page.campus-social-has-feed-tabs > .campus-social-
 
 body.dark-mode .campus-social-page .campus-social-avatar {
   background: #29372d;
-  box-shadow: 0 1px 6px rgba(0, 0, 0, .4);
+  box-shadow: none;
 }
 
 body.dark-mode .campus-social-activity-header {
@@ -4402,7 +4427,30 @@ body.dark-mode .campus-social-notification-empty h3 {
   color: #d7e5d9;
 }
 
+.campus-social-page .campus-social-post-author,
+.campus-social-page .campus-social-post-author > .campus-social-post-handle,
+.campus-social-page .campus-social-name-tags {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.campus-social-page .campus-social-name-tags > span {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.campus-social-page .campus-social-post-author > strong {
+  font-size: 1.15rem;
+}
+
 @media (max-width: 600px) {
+  .campus-social-page .campus-social-post-author > strong {
+    font-size: .98rem;
+  }
+
   .campus-social-activity-page {
     gap: 14px;
     padding: 18px 13px 28px;
@@ -4459,4 +4507,24 @@ body.dark-mode .campus-social-notifications-back {
 
 body.dark-mode .campus-social-notifications-back:hover {
   background: #26382a;
+}
+
+.campus-social-page .campus-social-avatar {
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: 50%;
+  clip-path: circle(50%);
+}
+
+.campus-social-page .campus-social-avatar > img {
+  aspect-ratio: 1 / 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-width: 100%;
+  min-height: 100%;
+  max-width: none;
+  border-radius: 50%;
+  object-fit: cover;
+  object-position: center;
 }

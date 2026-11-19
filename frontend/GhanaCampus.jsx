@@ -9,11 +9,19 @@ import { SettingsContext } from "./src/context/SettingsContext.js";
 import { useIsMobileLayout } from "./src/hooks/useIsMobileLayout.js";
 import { useStudentPortalRecords } from "./src/hooks/useStudentPortalRecords.js";
 import {
+  calculateRegisteredCourseCgpa,
+  classifyUccCgpa,
+} from "./src/utils/courseCgpa.js";
+import {
   DEFAULT_SETTINGS,
   calculateSubjectAggregate,
   getGrade,
   getStudentNavVisibility,
 } from "./src/config/campusConfig.js";
+import {
+  isPassingScore,
+  PASSMARK_PERCENTAGE,
+} from "./src/config/assessmentSettings.js";
 import {
   getLearningLevelName,
   getLearningResourceLabel,
@@ -2425,7 +2433,7 @@ const css = `
   .test-title { font-size:1.1rem; font-weight:700; color:#0f172a; flex:1; margin-right:12px; }
   .test-status { font-size:.8rem; font-weight:600; padding:4px 8px; border-radius:12px; background:#f3f4f6; white-space:nowrap; }
   .test-meta { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
-  .test-subject, .test-class, .test-type, .test-duration, .test-questions { font-size:.8rem; color:#64748b; background:#f8fafc; padding:4px 8px; border-radius:8px; }
+  .test-subject, .test-class, .test-type, .test-duration, .test-questions, .test-passmark { font-size:.8rem; color:#64748b; background:#f8fafc; padding:4px 8px; border-radius:8px; }
   .test-description { font-size:.9rem; color:#475569; margin-bottom:16px; line-height:1.5; }
   .test-score { display:flex; align-items:center; gap:6px; font-weight:600; color:#16a34a; margin-bottom:16px; }
   .test-actions { display:flex; gap:10px; }
@@ -5063,6 +5071,11 @@ body.dark-mode .admin-dashboard-school-copy small { color:#a0abc1; }
   justify-content: center;
   align-items: flex-start;
   padding: 24px 16px 30px;
+}
+@media (max-width: 1023px) {
+  .student-app .main {
+    padding-bottom: calc(96px + env(safe-area-inset-bottom));
+  }
 }
 .student-app .admin-dashboard.student-dashboard {
   position: relative;
@@ -9941,6 +9954,7 @@ function LiveTestsPage({ currentUser }) {
                   <span className="test-type">{test.test_type.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>
                   <span className="test-duration">{formatDuration(test.duration_minutes)}</span>
                   <span className="test-questions">{test.total_questions} questions</span>
+                  <span className="test-passmark">Pass mark: {PASSMARK_PERCENTAGE}%</span>
                 </div>
 
                 {test.description && (
@@ -15089,6 +15103,7 @@ function StudentDashboard({
   selectionInfo,
   scoreValues,
   scoreRecords,
+  practiceScores,
   courseProgressSummary,
   unreadNotificationCount,
   onOpenNotifications,
@@ -15179,6 +15194,7 @@ function StudentDashboard({
     .sort((left, right) =>
       new Date(right.created_at || 0).getTime() - new Date(left.created_at || 0).getTime(),
     )[0] || null;
+  const recentPracticeScores = Array.isArray(practiceScores) ? practiceScores : [];
   const navVisibility = getStudentNavVisibility(cfg);
   const feesEnabled =
     navVisibility.fees &&
@@ -15206,18 +15222,29 @@ function StudentDashboard({
     averageCompletion: 0,
     progressItems: [],
   };
+  const registeredCourseCgpa = calculateRegisteredCourseCgpa(
+    courseSummary.progressItems,
+    recentPracticeScores,
+  );
+  const registeredCgpaClass = classifyUccCgpa(registeredCourseCgpa.cgpa);
+  const courseGpaById = new Map(registeredCourseCgpa.courseGpas.map((course) => [
+    course.courseId,
+    course.gpa,
+  ]));
   const courseAverage = Math.min(100, Math.max(0, Number(courseSummary.averageCompletion) || 0));
   const allProgressItems = Array.isArray(courseSummary.progressItems)
     ? courseSummary.progressItems
     : [];
-  const progressItems = allProgressItems.slice(0, 3);
+  const progressItems = allProgressItems;
   const continueCourse = allProgressItems.find((item) => Number(item.percent) < 100) || null;
   const dashboardMetrics = [
     ...(resultsEnabled
       ? [{
-          label: "Current Average",
-          value: avg === null ? "—" : `${avg}%`,
-          sub: baseScores.length ? `Grade ${g.grade}` : "No scores recorded yet",
+          label: "Current CGPA",
+          value: registeredCourseCgpa.cgpa ?? "—",
+          sub: registeredCourseCgpa.gradedCourseCount
+            ? `${registeredCgpaClass} · Chapter-weighted across ${registeredCourseCgpa.gradedCourseCount} graded course${registeredCourseCgpa.gradedCourseCount === 1 ? "" : "s"}`
+            : "No registered course quiz scores yet",
           ic: dashboardGradeColors.icon,
           bgStart: dashboardGradeColors.start,
           bgEnd: dashboardGradeColors.end,
@@ -15448,6 +15475,9 @@ function StudentDashboard({
                         {item.completedCount} of {item.totalLessons} lessons complete
                       </small>
                     )}
+                    <small className="student-dashboard-lesson-count">
+                      GPA {courseGpaById.get(String(item.courseId)) ?? "—"}/4.00
+                    </small>
                   </div>
                 ))}
               </div>
@@ -15513,13 +15543,13 @@ function StudentDashboard({
                   </div>
                 )}
                 <div>
-                  <span>{latestScoreRecord ? "Latest result" : "Current period average"}</span>
+                  <span>{latestScoreRecord ? "Latest result" : "Current CGPA"}</span>
                   <strong>
                     {latestScoreRecord
                       ? `${Math.round(Number(latestScoreRecord.score))}% · ${latestScoreRecord.subject || latestScoreRecord.exam_type || "Assessment"}`
-                      : avg === null
-                        ? "No results recorded"
-                        : `${avg}%`}
+                      : registeredCourseCgpa.cgpa === null
+                        ? "No registered course quiz scores yet"
+                        : `CGPA ${registeredCourseCgpa.cgpa}/4.00 · ${registeredCgpaClass}`}
                   </strong>
                 </div>
                 {courseSummary.enrolledCount > 0 && (
@@ -15534,6 +15564,14 @@ function StudentDashboard({
                     <strong>{feeRows.length ? money.format(outstanding) : "No records"}</strong>
                   </div>
                 )}
+                {showCourses && (
+                  <div>
+                    <span>Practice quiz scores</span>
+                    <strong>{recentPracticeScores.length
+                      ? `${recentPracticeScores.length} saved`
+                      : "No scores yet"}</strong>
+                  </div>
+                )}
                 <button
                   className="student-dashboard-text-link"
                   type="button"
@@ -15544,6 +15582,27 @@ function StudentDashboard({
                     : "View campus updates"}
                 </button>
               </div>
+              {showCourses && recentPracticeScores.length > 0 && (
+                <div style={{ display: "grid", gap: 8, maxHeight: 240, overflowY: "auto", marginTop: 16 }}>
+                  {recentPracticeScores.map((attempt) => (
+                    <div key={attempt.id} style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 12,
+                      padding: "9px 0",
+                      borderTop: "1px solid #e2e8f0",
+                    }}>
+                      <span style={{ minWidth: 0, color: "#475569", fontSize: ".84rem" }}>
+                        {attempt.course_title} · {attempt.lesson_title}
+                      </span>
+                      <strong style={{ flex: "0 0 auto", color: "#123b70" }}>
+                        {Number(attempt.percentage)}% ({attempt.correct_count}/{attempt.total_questions})
+                      </strong>
+                    </div>
+                  ))}
+                </div>
+              )}
             </section>
           </div>
         </div>
@@ -20562,6 +20621,7 @@ const ADMIN_NAV = [
   { key: "fees", icon: "fees", label: "Fees", color: "#22c55e" },
   { section: "Communication" },
   { key: "study-teams", icon: "chat", label: "Study Teams", color: "#7c3aed" },
+  { key: "study-chats", icon: "chat", label: "Study Chats", color: "#0f766e" },
   { key: "helpdesk", icon: "support", label: "Student Support", color: "#0f766e" },
   { key: "chat", icon: "chat", label: "Chat", color: "#10b981" },
   { key: "documents", icon: "docs", label: "Documents", color: "#7c2d12" },
@@ -21302,6 +21362,7 @@ const STUDENT_NAV = [
   { key: "courses", icon: "docs", label: "Courses", color: "#0891b2" },
   { key: "social", icon: "profile", label: "Social", color: "#0f766e" },
   { key: "study-teams", icon: "chat", label: "Study Teams", color: "#7c3aed" },
+  { key: "chats", icon: "chat", label: "Chats", color: "#0f766e" },
   { section: "Communication & Resources" },
   { key: "announcements", icon: "bell", label: "Notifications", color: "#16834a" },
   { key: "support-tickets", icon: "support", label: "Support", color: "#0f766e" },
@@ -21470,7 +21531,7 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
       )
       .subscribe((status) => {
         if (status === "CHANNEL_ERROR") {
-          notify?.("Live support ticket alerts are unavailable. Refresh to check for new tickets.", "error");
+          console.warn("Live support ticket alerts are unavailable.");
         }
       });
 
@@ -22349,7 +22410,12 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
       ),
       "study-teams": (
         <Suspense fallback={<div className="portal-loading" role="status">Loading study teams...</div>}>
-          <StudyTeamsPage user={user} />
+          <StudyTeamsPage user={user} view="teams" />
+        </Suspense>
+      ),
+      "study-chats": (
+        <Suspense fallback={<div className="portal-loading" role="status">Loading chats...</div>}>
+          <StudyTeamsPage user={user} view="chats" />
         </Suspense>
       ),
       grading: <GradingPage />,
@@ -23529,7 +23595,12 @@ function SchoolAdminPortal({ user, onLogout, darkMode, onToggleDark }) {
       ),
       "study-teams": (
         <Suspense fallback={<div className="portal-loading" role="status">Loading study teams...</div>}>
-          <StudyTeamsPage user={user} />
+          <StudyTeamsPage user={user} view="teams" />
+        </Suspense>
+      ),
+      "study-chats": (
+        <Suspense fallback={<div className="portal-loading" role="status">Loading chats...</div>}>
+          <StudyTeamsPage user={user} view="chats" />
         </Suspense>
       ),
       grading: <GradingPage />,
@@ -23991,7 +24062,12 @@ function StudentLiveTestsPage({ user, studentData }) {
       setActiveSession(null);
       setTestData(null);
       loadAvailableTests();
-      alert(`Test submitted! Your score: ${totalScore}/${maxScore}`);
+      const scorePercentage = maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0;
+      const result = isPassingScore(totalScore, maxScore) ? "Passed" : "Not passed";
+      alert(
+        `Test submitted! Your score: ${totalScore}/${maxScore} (${scorePercentage}%). `
+        + `${result} — ${PASSMARK_PERCENTAGE}% required to pass.`,
+      );
     } catch (error) {
       console.error('Error submitting test:', error);
       alert('Failed to submit test. Please try again.');
@@ -24175,6 +24251,14 @@ function StudentLiveTestsPage({ user, studentData }) {
           availableTests.map(test => {
             const hasCompleted = test.session?.is_completed;
             const score = test.session ? `${test.session.score}/${test.session.max_score}` : null;
+            const rawScorePercentage = test.session?.max_score > 0
+              ? (test.session.score / test.session.max_score) * 100
+              : null;
+            const scorePercentage = rawScorePercentage === null
+              ? null
+              : Math.round(rawScorePercentage);
+            const passed = rawScorePercentage !== null
+              && isPassingScore(test.session.score, test.session.max_score);
 
             return (
               <div key={test.id} className="test-card">
@@ -24198,6 +24282,7 @@ function StudentLiveTestsPage({ user, studentData }) {
                   <span className="test-type">{test.test_type.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>
                   <span className="test-duration">{test.duration_minutes} min</span>
                   <span className="test-questions">{test.total_questions} questions</span>
+                  <span className="test-passmark">Pass mark: {PASSMARK_PERCENTAGE}%</span>
                 </div>
 
                 {test.description && (
@@ -24205,9 +24290,10 @@ function StudentLiveTestsPage({ user, studentData }) {
                 )}
 
                 {hasCompleted && score && (
-                  <div className="test-score">
-                    <Ico name="grade" size={16} color="#16a34a" />
-                    Your Score: {score}
+                  <div className="test-score" style={{ color: passed ? '#16a34a' : '#dc2626' }}>
+                    <Ico name="grade" size={16} color={passed ? '#16a34a' : '#dc2626'} />
+                    Your Score: {score}{scorePercentage === null ? "" : ` (${scorePercentage}%)`}
+                    {scorePercentage === null ? "" : ` · ${passed ? "Passed" : "Not passed"} — ${PASSMARK_PERCENTAGE}% required`}
                   </div>
                 )}
 
@@ -24314,6 +24400,7 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
   const [selectionRow, setSelectionRow] = useState(null);
   const [scoreValues, setScoreValues] = useState([]);
   const [scoreRecords, setScoreRecords] = useState([]);
+  const [practiceScores, setPracticeScores] = useState([]);
 
   const buildCourseProgressSummary = (enrollmentRows = [], courseRows = [], completedByEnrollment = {}) => {
     const courseMap = new Map((courseRows || []).filter(Boolean).map((course) => [course.id, course]));
@@ -24336,10 +24423,12 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
         : 0;
 
       return {
+        courseId: enrollment.course_id,
         title: course.title || "Course",
         percent: Math.min(100, Math.max(0, percent)),
         completedCount,
         totalLessons,
+        completedLessonIds: [...completedLessonIds],
       };
     });
 
@@ -24498,6 +24587,7 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
       });
       setScoreValues([]);
       setScoreRecords([]);
+      setPracticeScores([]);
       setSelectionRow(null);
       if (!supabase || isPreviewStudentUser(user?.id)) {
         const demoScores = [82, 86, 90, 88, 93];
@@ -24517,14 +24607,65 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
         setAttendanceData(demoAttendance);
         setFeesData(demoFees);
         setScoreValues(demoScores);
+        const demoCourseIds = {
+          mathematics: "demo-course-mathematics",
+          science: "demo-course-science",
+          english: "demo-course-english",
+        };
+        setPracticeScores([
+          {
+            id: "demo-math-lesson-1",
+            course_id: demoCourseIds.mathematics,
+            lesson_id: "lesson-1",
+            course_title: "Mathematics",
+            lesson_title: "Number skills",
+            correct_count: 4,
+            total_questions: 5,
+            percentage: 80,
+            created_at: "2025-01-08T00:00:00.000Z",
+          },
+          {
+            id: "demo-math-lesson-2",
+            course_id: demoCourseIds.mathematics,
+            lesson_id: "lesson-2",
+            course_title: "Mathematics",
+            lesson_title: "Algebra",
+            correct_count: 18,
+            total_questions: 25,
+            percentage: 72,
+            created_at: "2025-01-09T00:00:00.000Z",
+          },
+          {
+            id: "demo-science-lesson-1",
+            course_id: demoCourseIds.science,
+            lesson_id: "lesson-1",
+            course_title: "Science",
+            lesson_title: "Scientific measurement",
+            correct_count: 13,
+            total_questions: 20,
+            percentage: 65,
+            created_at: "2025-01-10T00:00:00.000Z",
+          },
+          {
+            id: "demo-english-lesson-1",
+            course_id: demoCourseIds.english,
+            lesson_id: "lesson-1",
+            course_title: "English",
+            lesson_title: "Reading comprehension",
+            correct_count: 21,
+            total_questions: 25,
+            percentage: 84,
+            created_at: "2025-01-11T00:00:00.000Z",
+          },
+        ]);
         setCourseProgressSummary({
           enrolledCount: 3,
           completedCount: 1,
           averageCompletion: 72,
           progressItems: [
-            { title: "Mathematics", percent: 90 },
-            { title: "Science", percent: 74 },
-            { title: "English", percent: 68 },
+            { courseId: demoCourseIds.mathematics, title: "Mathematics", percent: 90 },
+            { courseId: demoCourseIds.science, title: "Science", percent: 74 },
+            { courseId: demoCourseIds.english, title: "English", percent: 68 },
           ],
         });
         setSelectionRow({
@@ -24623,8 +24764,9 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
           const [progressResponse, coursesResponse] = await Promise.all([
             supabase
               .from("course_lesson_progress")
-              .select("enrollment_id, lesson_id")
-              .in("enrollment_id", enrollmentRows.map((row) => row.id)),
+              .select("enrollment_id, lesson_id, quiz_passed")
+              .in("enrollment_id", enrollmentRows.map((row) => row.id))
+              .eq("quiz_passed", true),
             courseIds.length
               ? supabase.from("courses").select("id, title, lessons").in("id", courseIds)
               : Promise.resolve({ data: [] }),
@@ -24649,6 +24791,7 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
         { data: attendanceRows, error: attendanceError },
         { data: feeRows, error: feeError },
         { data: scoreRows, error: scoreError },
+        { data: practiceScoreRows, error: practiceScoreError },
         selection,
         courseProgress,
       ] = await Promise.all([
@@ -24663,6 +24806,11 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
           .eq("student_id", student.id)
           .order("id", { ascending: false }),
         fetchStudentScores(),
+        supabase
+          .from("course_quiz_attempts")
+          .select("id, course_id, lesson_id, course_title, lesson_title, correct_count, total_questions, percentage, created_at, attempt_type, resit_of_attempt_id")
+          .eq("student_id", student.id)
+          .order("created_at", { ascending: false }),
         fetchStudentSelection({
           supabase,
           userEmail: user?.email || getSessionUserEmail(),
@@ -24680,6 +24828,7 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
         attendanceError && `Attendance: ${attendanceError.message}`,
         feeError && `Fees: ${feeError.message}`,
         scoreError && `Scores: ${scoreError.message}`,
+        practiceScoreError && `Practice scores: ${practiceScoreError.message}`,
       ].filter(Boolean);
       if (loadErrors.length) {
         setStudentDataError((current) =>
@@ -24727,6 +24876,7 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
         },
       );
       setScoreRecords(validScoreRows);
+      setPracticeScores(practiceScoreRows || []);
       setScoreValues(
         validScoreRows
           .filter(
@@ -25064,6 +25214,7 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
           }}
           scoreValues={scoreValues}
           scoreRecords={scoreRecords}
+          practiceScores={practiceScores}
           courseProgressSummary={courseProgressSummary}
           unreadNotificationCount={unreadPortalNotificationCount}
           onOpenNotifications={openNotifications}
@@ -25097,7 +25248,15 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
       ),
       courses: (
         <Suspense fallback={<div className="portal-loading" role="status">Loading courses...</div>}>
-          <CoursesPage mode="student" studentData={studentData} />
+          <CoursesPage
+            mode="student"
+            studentData={studentData}
+            onPracticeScoreSaved={(attempt) => setPracticeScores((current) => [
+              attempt,
+              ...current.filter((savedAttempt) => savedAttempt.id !== attempt.id),
+            ])}
+            onCourseProgressUpdated={setCourseProgressSummary}
+          />
         </Suspense>
       ),
       social: (
@@ -25108,7 +25267,7 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
             onOpenStudentProfile={() => goTab("profile")}
             onMessageStudent={(member) => {
               setSocialMessageTarget(member);
-              goTab("study-teams");
+              goTab("chats");
             }}
             memberToOpen={socialMemberToOpen}
             onMemberProfileOpened={() => setSocialMemberToOpen(null)}
@@ -25121,6 +25280,20 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
           <StudyTeamsPage
             user={user}
             studentData={studentData}
+            view="teams"
+            onOpenChat={(member) => {
+              setSocialMessageTarget(member);
+              goTab("chats");
+            }}
+          />
+        </Suspense>
+      ),
+      chats: (
+        <Suspense fallback={<div className="portal-loading" role="status">Loading chats...</div>}>
+          <StudyTeamsPage
+            user={user}
+            studentData={studentData}
+            view="chats"
             messageTarget={socialMessageTarget}
             onMessageTargetHandled={() => setSocialMessageTarget(null)}
           />

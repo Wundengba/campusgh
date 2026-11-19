@@ -1,10 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { jsPDF } from "jspdf";
 import { supabase } from "../lib/supabaseClient.js";
+import {
+  isPassingScore,
+  PASSMARK_PERCENTAGE,
+} from "../config/assessmentSettings.js";
 import { getLearningLevelFromClass, LEARNING_LEVELS } from "../config/learningCatalog.js";
 import { extractDocumentContent, getDocumentTitle } from "../utils/documentImport.js";
+import {
+  listOfflineCourses,
+  removeOfflineCourse,
+  saveOfflineCourse,
+} from "../utils/offlineCourseStore.js";
 import "./CoursesPage.css";
 
 const COURSE_IMAGES_BUCKET = "course-images";
+const COURSE_IMAGE_CACHE_NAME = "campus-ghana-course-images-v1";
 const IMAGE_CONTENT_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 const MAX_IMAGES_PER_IMPORT = 80;
 const MAX_IMAGE_BYTES_PER_IMPORT = 20 * 1024 * 1024;
@@ -25,6 +36,7 @@ const newQuizQuestion = () => ({
     { id: createId("option"), text: "" },
   ],
   correctOptionId: "",
+  explanation: "",
 });
 
 const normalizeQuizQuestion = (question) => ({
@@ -37,7 +49,12 @@ const normalizeQuizQuestion = (question) => ({
       }))
     : [],
   correctOptionId: typeof question?.correctOptionId === "string" ? question.correctOptionId : "",
+  explanation: typeof question?.explanation === "string" ? question.explanation : "",
 });
+
+const hasFillInBlank = (value) =>
+  /_{2,}|\bfill\s+in(?:\s+the)?\s+blank\b|\bcomplete(?:s)?\s+(?:the|this)\s+(?:blank|missing\s+(?:word|term)|sentence|statement)\b|\b(?:which|what)\s+(?:word|term)\s+(?:best\s+)?completes?\s+(?:the|this)\s+(?:sentence|statement)\b/i
+    .test(String(value || ""));
 
 const newLesson = () => ({
   id: globalThis.crypto?.randomUUID?.() || `lesson-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -54,6 +71,9 @@ const getQuizQuestionError = (question) => {
   const options = Array.isArray(question?.options)
     ? question.options.filter((option) => typeof option?.text === "string" && option.text.trim())
     : [];
+  if (hasFillInBlank(prompt) || options.some((option) => hasFillInBlank(option.text))) {
+    return "Fill-in-the-blank questions are not supported. Use a multiple-choice question.";
+  }
   if (!prompt) return "Add a question prompt.";
   if (options.length < 2) return "Add at least two answer choices.";
   if (!options.some((option) => option.id === question.correctOptionId)) {
@@ -74,8 +94,8 @@ function QuizEditor({ questions = [], disabled = false, onChange }) {
   );
   return (
     <fieldset className="courses-quiz-editor" disabled={disabled}>
-      <legend>Optional lesson practice quiz</legend>
-      <p>Write multiple-choice questions for practice. Scores are not saved and should not be used for formal assessment.</p>
+      <legend>Optional instructor-written multiple-choice questions</legend>
+      <p>Fill-in-the-blank questions are excluded from course quizzes.</p>
       {questions.map((question, questionIndex) => (
         <section className="courses-quiz-question-editor" key={question.id}>
           <div className="courses-quiz-question-heading">
@@ -124,6 +144,10 @@ function QuizEditor({ questions = [], disabled = false, onChange }) {
             })}>
             Add answer choice
           </button>
+          <label>Explanation shown after the quiz
+            <textarea className="form-control" rows="2" value={question.explanation || ""}
+              onChange={(event) => updateQuestion(question.id, { explanation: event.target.value })} />
+          </label>
         </section>
       ))}
       <button className="btn btn-outline" type="button"
@@ -131,6 +155,213 @@ function QuizEditor({ questions = [], disabled = false, onChange }) {
         Add quiz question
       </button>
     </fieldset>
+  );
+}
+
+function CourseDiscussions({ courseId, lessonId, isAdmin }) {
+  const [discussions, setDiscussions] = useState([]);
+  const [authorNames, setAuthorNames] = useState({});
+  const [message, setMessage] = useState("");
+  const [replyTo, setReplyTo] = useState("");
+  const [authUserId, setAuthUserId] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [deletingDiscussionId, setDeletingDiscussionId] = useState("");
+  const [error, setError] = useState("");
+
+  const loadDiscussions = useCallback(async () => {
+    if (!supabase || !courseId || !lessonId) {
+      setDiscussions([]);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    setDiscussions([]);
+    setAuthorNames({});
+    try {
+      const [{ data: userData, error: userError }, { data, error: discussionError }] = await Promise.all([
+        supabase.auth.getUser(),
+        supabase
+          .from("course_discussions")
+          .select("id, parent_id, author_id, body, is_hidden, created_at")
+          .eq("course_id", courseId)
+          .eq("lesson_id", lessonId)
+          .order("created_at", { ascending: true }),
+      ]);
+      if (userError) throw userError;
+      if (discussionError) throw discussionError;
+      const discussionRows = data || [];
+      const authorIds = [...new Set(discussionRows.map((discussion) => discussion.author_id).filter(Boolean))];
+      let names = {};
+      if (authorIds.length) {
+        const { data: authorRows, error: authorError } = await supabase.rpc(
+          "get_course_discussion_author_names",
+          { p_course_id: courseId, p_author_ids: authorIds },
+        );
+        if (authorError) throw authorError;
+        names = Object.fromEntries((authorRows || [])
+          .map((row) => [row.author_id, row.display_name]));
+      }
+      setAuthUserId(userData.user?.id || "");
+      setAuthorNames(names);
+      setDiscussions(discussionRows);
+    } catch (loadError) {
+      setError(`Lesson discussion could not be loaded: ${loadError.message || "Supabase request failed."}`);
+      setDiscussions([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [courseId, lessonId]);
+
+  useEffect(() => {
+    loadDiscussions();
+  }, [loadDiscussions]);
+
+  const submitMessage = async (event) => {
+    event.preventDefault();
+    const body = message.trim();
+    if (!supabase || !body || !courseId || !lessonId) return;
+
+    setSaving(true);
+    setError("");
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
+      if (!userData.user?.id) throw new Error("Sign in before posting a course question.");
+      const { error: insertError } = await supabase.from("course_discussions").insert({
+        course_id: courseId,
+        lesson_id: lessonId,
+        author_id: userData.user.id,
+        parent_id: replyTo || null,
+        body,
+      });
+      if (insertError) throw insertError;
+      setMessage("");
+      setReplyTo("");
+      await loadDiscussions();
+    } catch (submitError) {
+      setError(`Your discussion message could not be saved: ${submitError.message || "Supabase request failed."}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleHidden = async (discussion) => {
+    if (!supabase || !isAdmin) return;
+    setError("");
+    const { error: updateError } = await supabase
+      .from("course_discussions")
+      .update({ is_hidden: !discussion.is_hidden })
+      .eq("id", discussion.id);
+    if (updateError) {
+      setError(`Discussion moderation failed: ${updateError.message}`);
+      return;
+    }
+    await loadDiscussions();
+  };
+
+  const deleteDiscussion = async (discussion) => {
+    const replyWarning = !discussion.parent_id
+      ? " Any replies in this thread will also be permanently deleted."
+      : "";
+    if (!window.confirm(`Delete this discussion message?${replyWarning}`)) return;
+
+    setDeletingDiscussionId(discussion.id);
+    setError("");
+    try {
+      const { data, error: deleteError } = await supabase
+        .from("course_discussions")
+        .delete()
+        .eq("id", discussion.id)
+        .select("id")
+        .maybeSingle();
+      if (deleteError) throw deleteError;
+      if (!data) throw new Error("This message could not be deleted. It may already be gone.");
+      await loadDiscussions();
+    } catch (deleteError) {
+      setError(`Discussion message could not be deleted: ${deleteError.message || "Supabase request failed."}`);
+    } finally {
+      setDeletingDiscussionId("");
+    }
+  };
+
+  const roots = discussions.filter((discussion) => !discussion.parent_id);
+  const authorLabel = (authorId) => {
+    const name = authorNames[authorId] || (authorId === authUserId ? "You" : "Course member");
+    return authorId === authUserId && name !== "You" ? `${name} (you)` : name;
+  };
+  return (
+    <section className="courses-discussions" aria-labelledby={`discussion-${lessonId}`}>
+      <div>
+        <span className="courses-eyebrow">LESSON Q&amp;A</span>
+        <h3 id={`discussion-${lessonId}`}>Questions and discussion</h3>
+        <p>Ask a question about this lesson or reply to a classmate.</p>
+      </div>
+      {error && <div className="alert alert-warning" role="alert">{error}</div>}
+      {loading ? <p role="status">Loading lesson discussion...</p> : (
+        <div className="courses-discussion-list">
+          {roots.map((root) => (
+            <article className={`courses-discussion ${root.is_hidden ? "is-hidden" : ""}`} key={root.id}>
+              <p>{root.body}</p>
+              <small>{authorLabel(root.author_id)} · {new Date(root.created_at).toLocaleString()}</small>
+              <div className="courses-discussion-actions">
+                {!root.is_hidden && (
+                  <button className="btn btn-outline courses-discussion-action" type="button"
+                    onClick={() => setReplyTo(root.id)}>
+                    Reply
+                  </button>
+                )}
+                {isAdmin && (
+                  <button className="btn btn-outline" type="button" onClick={() => toggleHidden(root)}>
+                    {root.is_hidden ? "Restore" : "Hide"}
+                  </button>
+                )}
+                {(isAdmin || root.author_id === authUserId) && (
+                  <button className="btn btn-outline courses-delete courses-discussion-action" type="button"
+                    disabled={Boolean(deletingDiscussionId)}
+                    onClick={() => deleteDiscussion(root)}>
+                    {deletingDiscussionId === root.id ? "Deleting..." : "Delete"}
+                  </button>
+                )}
+              </div>
+              {discussions.filter((reply) => reply.parent_id === root.id).map((reply) => (
+                <div className={`courses-discussion-reply ${reply.is_hidden ? "is-hidden" : ""}`} key={reply.id}>
+                  <p>{reply.body}</p>
+                  <small>{authorLabel(reply.author_id)} · {new Date(reply.created_at).toLocaleString()}</small>
+                  {isAdmin && (
+                    <button className="btn btn-outline" type="button" onClick={() => toggleHidden(reply)}>
+                      {reply.is_hidden ? "Restore" : "Hide"}
+                    </button>
+                  )}
+                  {(isAdmin || reply.author_id === authUserId) && (
+                    <button className="btn btn-outline courses-delete courses-discussion-action" type="button"
+                      disabled={Boolean(deletingDiscussionId)}
+                      onClick={() => deleteDiscussion(reply)}>
+                      {deletingDiscussionId === reply.id ? "Deleting..." : "Delete"}
+                    </button>
+                  )}
+                </div>
+              ))}
+            </article>
+          ))}
+          {!roots.length && <p>No questions yet. Start the discussion for this lesson.</p>}
+        </div>
+      )}
+      <form className="courses-discussion-form" onSubmit={submitMessage}>
+        <label>
+          {replyTo ? (isAdmin ? "Instructor reply" : "Your reply")
+            : isAdmin ? "Post an instructor update" : "Ask a question"}
+          {replyTo && <button type="button" className="courses-cancel-reply" onClick={() => setReplyTo("")}>Cancel reply</button>}
+          <textarea className="form-control" rows="3" maxLength={3000} value={message}
+            onChange={(event) => setMessage(event.target.value)} required />
+        </label>
+        <button className="btn btn-blue" type="submit" disabled={saving || !message.trim()}>
+          {saving ? "Posting..." : replyTo ? "Post reply" : isAdmin ? "Post update" : "Post question"}
+        </button>
+      </form>
+    </section>
   );
 }
 
@@ -201,11 +432,289 @@ const courseProgress = (course, completedLessons) => {
   );
 };
 
+const createsPrerequisiteCycle = (courseId, prerequisites, courses) => {
+  if (!courseId) return false;
+  const courseById = new Map(courses.map((course) => [course.id, course]));
+  const visited = new Set();
+  const reachesEditedCourse = (candidateId) => {
+    if (candidateId === courseId) return true;
+    if (visited.has(candidateId)) return false;
+    visited.add(candidateId);
+    return (courseById.get(candidateId)?.prerequisites || []).some(reachesEditedCourse);
+  };
+  return prerequisites.some(reachesEditedCourse);
+};
+
+const shuffleQuizQuestions = (questions, previousOrder = []) => {
+  const shuffled = [...questions];
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+  }
+  if (shuffled.length > 1
+    && shuffled.every((question, index) => question.id === previousOrder[index]?.id)) {
+    shuffled.unshift(shuffled.pop());
+  }
+  return shuffled;
+};
+
+const estimateCourseDurationMinutes = (course) => {
+  const lessons = Array.isArray(course?.lessons) ? course.lessons : [];
+  if (!lessons.length) return null;
+  const wordCount = lessons.reduce((count, lesson) => {
+    const text = String(lesson?.content || "")
+      .replace(/<[^>]*>/g, " ")
+      .replace(/&nbsp;|&#160;/gi, " ");
+    return count + (text.match(/\S+/g) || []).length;
+  }, 0);
+  return Math.max(5, Math.ceil(wordCount / 200) + lessons.length * 3);
+};
+
+const formatCourseDuration = (minutes) => {
+  if (!Number.isFinite(minutes)) return "Estimate unavailable";
+  if (minutes < 60) return `Approx. ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return `Approx. ${hours} hr${hours === 1 ? "" : "s"}${remainingMinutes ? ` ${remainingMinutes} min` : ""}`;
+};
+
+const toDateTimeInputValue = (value) => {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+  return date.toISOString().slice(0, 16);
+};
+
+const formatCourseDate = (value) => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? "No due date"
+    : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
+};
+
+const downloadLessonNotes = (course, lesson) => {
+  const text = `${course.title}\n${lesson.title}\n\n${lesson.content || ""}`;
+  const blobUrl = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = blobUrl;
+  link.download = `${course.title} - ${lesson.title}.txt`
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-");
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(blobUrl), 0);
+};
+
+const QUIZ_STOP_WORDS = new Set(
+  "about after again against all also among another any are because been before being between both but can could did does doing down during each few for from further had has have having here hers herself him himself his how into its itself just more most nor not off once only other our ours ourselves out over own same she should some such than that the their theirs them themselves then there these they this those through too under until very was were what when where which while who whom why will with would you your".split(" "),
+);
+
+const courseTextTerms = (text) => (text.match(/\b[A-Za-z][A-Za-z'-]{3,}\b/g) || [])
+  .filter((term) => !QUIZ_STOP_WORDS.has(term.toLowerCase()));
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const LESSON_SECTION_HEADINGS = new Map([
+  ["LEARNING OUTCOMES", "Learning outcomes"],
+  ["TEACH", "Learn the concept"],
+  ["WORKED EXAMPLES", "Worked examples"],
+  ["GUIDED ACTIVITY", "Guided practice"],
+  ["TRY WORK", "Try it yourself"],
+]);
+
+const renderMathText = (text, keyPrefix) => {
+  const expression = /(-?\d+)\s*\/\s*(-?\d+)|([A-Za-z0-9]+)\^(-?\d+)/g;
+  const nodes = [];
+  let lastIndex = 0;
+  let match;
+  let tokenIndex = 0;
+
+  while ((match = expression.exec(text))) {
+    if (match.index > lastIndex) nodes.push(text.slice(lastIndex, match.index));
+    if (match[1]) {
+      nodes.push(
+        <span
+          aria-label={`${match[1]} over ${match[2]}`}
+          className="courses-math-fraction"
+          key={`${keyPrefix}-math-${tokenIndex}`}
+          role="math"
+        >
+          <span>{match[1]}</span>
+          <span>{match[2]}</span>
+        </span>,
+      );
+    } else {
+      nodes.push(
+        <span key={`${keyPrefix}-math-${tokenIndex}`}>
+          {match[3]}<sup>{match[4]}</sup>
+        </span>,
+      );
+    }
+    lastIndex = expression.lastIndex;
+    tokenIndex += 1;
+  }
+
+  if (!tokenIndex) return text;
+  nodes.push(text.slice(lastIndex));
+  return nodes;
+};
+
+const renderLessonBlocks = (lines, keyPrefix) => {
+  const blocks = [];
+  let paragraph = [];
+  let listItems = [];
+  let blockIndex = 0;
+
+  const flushParagraph = () => {
+    if (!paragraph.length) return;
+    blocks.push(
+      <p key={`${keyPrefix}-paragraph-${blockIndex++}`}>
+        {renderMathText(paragraph.join(" "), `${keyPrefix}-paragraph-${blockIndex}`)}
+      </p>,
+    );
+    paragraph = [];
+  };
+
+  const flushList = () => {
+    if (!listItems.length) return;
+    blocks.push(
+      <ol key={`${keyPrefix}-list-${blockIndex++}`}>
+        {listItems.map((item, index) => (
+          <li key={`${keyPrefix}-list-${blockIndex}-${index}`}>
+            {renderMathText(item, `${keyPrefix}-list-${blockIndex}-${index}`)}
+          </li>
+        ))}
+      </ol>,
+    );
+    listItems = [];
+  };
+
+  lines.forEach((line) => {
+    const trimmed = line.trim();
+    const heading = LESSON_SECTION_HEADINGS.get(trimmed.toUpperCase());
+    const listItem = trimmed.match(/^\d+\.\s+(.+)$/);
+    if (!trimmed) {
+      flushParagraph();
+      flushList();
+    } else if (heading) {
+      flushParagraph();
+      flushList();
+      blocks.push(<h3 key={`${keyPrefix}-heading-${blockIndex++}`}>{heading}</h3>);
+    } else if (listItem) {
+      flushParagraph();
+      listItems.push(listItem[1]);
+    } else {
+      flushList();
+      paragraph.push(trimmed);
+    }
+  });
+
+  flushParagraph();
+  flushList();
+  return blocks;
+};
+
+const renderCourseLessonContent = (content) => {
+  const lines = String(content || "").split(/\r?\n/);
+  const answerStart = lines.findIndex((line) => line.trim().toUpperCase() === "ANSWER GUIDE");
+  const lessonLines = answerStart < 0 ? lines : lines.slice(0, answerStart);
+  const answerLines = answerStart < 0 ? [] : lines.slice(answerStart + 1);
+
+  return (
+    <div className="courses-lesson-body">
+      {renderLessonBlocks(lessonLines, "lesson")}
+      {answerLines.length > 0 && (
+        <details className="courses-lesson-answers">
+          <summary>Check your answers after attempting the practice</summary>
+          {renderLessonBlocks(answerLines, "answers")}
+        </details>
+      )}
+    </div>
+  );
+};
+
+const generateCourseQuiz = (course) => {
+  const lessons = Array.isArray(course?.lessons) ? course.lessons : [];
+  const sentences = lessons.flatMap((lesson, lessonIndex) => {
+    const text = String(lesson?.content || "")
+      .replace(/<[^>]*>/g, " ")
+      .replace(/&nbsp;|&#160;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&quot;|&#34;/gi, '"')
+      .replace(/&#39;|&apos;/gi, "'");
+    return (text.match(/[^.!?\n]+[.!?]?/g) || [])
+      .map((sentence) => ({
+        lessonIndex,
+        lessonTitle: lesson.title || `Lesson ${lessonIndex + 1}`,
+        text: sentence.trim().replace(/\s+/g, " "),
+      }))
+      .filter(({ text: sentence }) => {
+        const wordCount = sentence.split(/\s+/).length;
+        return wordCount >= 7 && wordCount <= 40 && !hasFillInBlank(sentence);
+      });
+  });
+  const allTerms = [...new Map([
+    ...sentences.flatMap(({ text }) => courseTextTerms(text)),
+    ...lessons.flatMap((lesson) => courseTextTerms(lesson.title || "")),
+    ...courseTextTerms(course?.subject || ""),
+  ].map((term) => [term.toLowerCase(), term])).values()];
+  const generatedQuestions = [];
+
+  const instructorQuestions = lessons.flatMap((lesson, lessonIndex) =>
+    (Array.isArray(lesson.quiz) ? lesson.quiz : [])
+      .filter((question) => !getQuizQuestionError(question))
+      .map((question, questionIndex) => ({
+        ...normalizeQuizQuestion(question),
+        id: `instructor-${lessonIndex}-${questionIndex}`,
+      })),
+  );
+
+  sentences.forEach((sentence, sentenceIndex) => {
+    if (generatedQuestions.length >= 10) return;
+    const sentenceTerms = new Set(courseTextTerms(sentence.text).map((term) => term.toLowerCase()));
+    const answerTerm = courseTextTerms(sentence.text)
+      .sort((a, b) => b.length - a.length)
+      .find((term) => (sentence.text.match(
+        new RegExp(`\\b${escapeRegExp(term)}\\b`, "gi"),
+      ) || []).length === 1);
+    if (!answerTerm) return;
+
+    const distractors = allTerms.filter((term) =>
+      term.toLowerCase() !== answerTerm.toLowerCase()
+      && !sentenceTerms.has(term.toLowerCase()))
+      .map((term) => sentence.text.replace(
+        new RegExp(`\\b${escapeRegExp(answerTerm)}\\b`, "i"),
+        term,
+      ))
+      .filter((statement, index, statements) =>
+        statement !== sentence.text && statements.indexOf(statement) === index);
+    const options = [sentence.text, ...distractors.slice(0, 3)];
+    if (options.length < 2) return;
+    const answerIndex = generatedQuestions.length % options.length;
+    const positionedOptions = [...options];
+    const [answer] = positionedOptions.splice(0, 1);
+    positionedOptions.splice(answerIndex, 0, answer);
+
+    generatedQuestions.push({
+      id: `generated-${sentence.lessonIndex}-${sentenceIndex}`,
+      prompt: `Which statement is accurate according to "${sentence.lessonTitle}"?`,
+      explanation: sentence.text,
+      options: positionedOptions.map((text, optionIndex) => ({
+        id: `generated-${sentence.lessonIndex}-${sentenceIndex}-option-${optionIndex}`,
+        text,
+      })),
+      correctOptionId: `generated-${sentence.lessonIndex}-${sentenceIndex}-option-${answerIndex}`,
+    });
+  });
+
+  return [...instructorQuestions, ...generatedQuestions].slice(0, 10);
+};
+
 const createCourseDraft = (course) => ({
   title: typeof course?.title === "string" ? course.title : "",
   description: typeof course?.description === "string" ? course.description : "",
   subject: typeof course?.subject === "string" ? course.subject : "",
   is_published: typeof course?.is_published === "boolean" ? course.is_published : true,
+  due_at: typeof course?.due_at === "string" ? course.due_at : "",
+  prerequisites: Array.isArray(course?.prerequisites) ? course.prerequisites : [],
   coverImage: null,
   lessons: Array.isArray(course?.lessons)
     ? course.lessons.map((lesson) => ({
@@ -253,7 +762,12 @@ const reviewCourseDraft = (course, existingTitles, seenTitles) => {
   return { errors, warnings };
 };
 
-export default function CoursesPage({ mode, studentData }) {
+export default function CoursesPage({
+  mode,
+  studentData,
+  onPracticeScoreSaved,
+  onCourseProgressUpdated,
+}) {
   const isAdmin = mode === "admin";
   const studentId = studentData?.id;
   const inferredLevel = getLearningLevelFromClass(
@@ -263,6 +777,12 @@ export default function CoursesPage({ mode, studentData }) {
   const [courseImageUrls, setCourseImageUrls] = useState({});
   const [enrollments, setEnrollments] = useState([]);
   const [completedByEnrollment, setCompletedByEnrollment] = useState({});
+  const [learningStateByEnrollment, setLearningStateByEnrollment] = useState({});
+  const [lessonNotesByEnrollment, setLessonNotesByEnrollment] = useState({});
+  const [certificatesByEnrollment, setCertificatesByEnrollment] = useState({});
+  const [offlineCourseRecords, setOfflineCourseRecords] = useState([]);
+  const [adminAnalytics, setAdminAnalytics] = useState([]);
+  const [isOffline, setIsOffline] = useState(globalThis.navigator?.onLine === false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -278,8 +798,21 @@ export default function CoursesPage({ mode, studentData }) {
   const [editingCourse, setEditingCourse] = useState(null);
   const [activeCourseId, setActiveCourseId] = useState("");
   const [activeLessonId, setActiveLessonId] = useState("");
-  const [quizAnswers, setQuizAnswers] = useState({});
-  const [quizResults, setQuizResults] = useState({});
+  const [showLessonQuiz, setShowLessonQuiz] = useState(false);
+  const [lessonQuizQuestions, setLessonQuizQuestions] = useState([]);
+  const [lessonQuizQuestionIndex, setLessonQuizQuestionIndex] = useState(0);
+  const [lessonQuizAttempt, setLessonQuizAttempt] = useState(0);
+  const [lessonQuizAnswers, setLessonQuizAnswers] = useState({});
+  const [lessonQuizCorrectionMode, setLessonQuizCorrectionMode] = useState(false);
+  const [lessonQuizCorrectionQuestions, setLessonQuizCorrectionQuestions] = useState([]);
+  const [lessonQuizCorrectionAnswers, setLessonQuizCorrectionAnswers] = useState({});
+  const [lessonQuizInitialAttemptId, setLessonQuizInitialAttemptId] = useState("");
+  const [lessonQuizFirstAttemptScore, setLessonQuizFirstAttemptScore] = useState(0);
+  const [lessonQuizSubmitted, setLessonQuizSubmitted] = useState(false);
+  const [lessonQuizScore, setLessonQuizScore] = useState(0);
+  const [lessonQuizPassed, setLessonQuizPassed] = useState(false);
+  const [savingLessonQuiz, setSavingLessonQuiz] = useState(false);
+  const lessonQuizPageRef = useRef(null);
   const previewObjectUrls = useRef(new Set());
 
   const releasePreviewObjectUrls = () => {
@@ -297,15 +830,53 @@ export default function CoursesPage({ mode, studentData }) {
     previewObjectUrls.current.clear();
   }, []);
 
+  const restoreOfflineCourses = useCallback(async () => {
+    if (isAdmin || !studentId) return false;
+    const records = await listOfflineCourses();
+    const studentRecords = records.filter((record) => record.studentId === String(studentId));
+    if (!studentRecords.length) return false;
+
+    setOfflineCourseRecords(studentRecords);
+    setCourses(studentRecords.map((record) => record.course));
+    setEnrollments(studentRecords.map((record) => record.enrollment).filter(Boolean));
+    setCompletedByEnrollment(Object.fromEntries(studentRecords
+      .filter((record) => record.enrollment?.id)
+      .map((record) => [record.enrollment.id, new Set(record.completedLessonIds || [])])));
+    setLearningStateByEnrollment(Object.fromEntries(studentRecords
+      .filter((record) => record.enrollment?.id)
+      .map((record) => [record.enrollment.id, { last_lesson_id: record.lastLessonId || null }])));
+    setLessonNotesByEnrollment(Object.fromEntries(studentRecords.flatMap((record) =>
+      Object.entries(record.lessonNotes || {}).map(([lessonId, note]) => [
+        `${record.enrollment?.id}:${lessonId}`,
+        note,
+      ]))));
+    setCertificatesByEnrollment(Object.fromEntries(studentRecords
+      .filter((record) => record.enrollment?.id && record.certificate)
+      .map((record) => [record.enrollment.id, record.certificate])));
+    setCourseImageUrls(Object.assign({}, ...studentRecords.map((record) => record.imageUrls || {})));
+    setIsOffline(true);
+    setNotice("Offline mode: saved courses are available to read. Quizzes, discussions, and syncing require an internet connection.");
+    setError("");
+    return true;
+  }, [isAdmin, studentId]);
+
   const loadCourses = useCallback(async () => {
     if (!supabase) {
-      setError("Courses are unavailable because Supabase is not configured.");
-      setCourses([]);
+      try {
+        const restored = await restoreOfflineCourses();
+        if (!restored) {
+          setError("Courses are unavailable because Supabase is not configured and no offline courses are saved.");
+          setCourses([]);
+        }
+      } catch (offlineError) {
+        setError(`Courses are unavailable because Supabase is not configured. Offline storage failed: ${offlineError.message}`);
+      }
       setLoading(false);
       return;
     }
 
     setLoading(true);
+    setIsOffline(false);
     setError("");
     try {
       const { data: courseRows, error: courseError } = await supabase
@@ -315,7 +886,67 @@ export default function CoursesPage({ mode, studentData }) {
       if (courseError) throw courseError;
       setCourses(courseRows || []);
 
-      if (!isAdmin && studentId) {
+      if (isAdmin) {
+        setEnrollments([]);
+        setCompletedByEnrollment({});
+        const courseIds = (courseRows || []).map((course) => course.id);
+        if (courseIds.length) {
+          const { data: enrollmentRows, error: enrollmentError } = await supabase
+            .from("course_enrollments")
+            .select("id, course_id")
+            .in("course_id", courseIds);
+          if (enrollmentError) throw enrollmentError;
+          const enrollmentsForCourses = enrollmentRows || [];
+          const enrollmentIds = enrollmentsForCourses.map((row) => row.id);
+          const [progressResponse, attemptResponse] = enrollmentIds.length
+            ? await Promise.all([
+                supabase
+                  .from("course_lesson_progress")
+                  .select("enrollment_id, lesson_id")
+                  .in("enrollment_id", enrollmentIds)
+                  .eq("quiz_passed", true),
+                supabase
+                  .from("course_quiz_attempts")
+                  .select("course_id, percentage")
+                  .in("course_id", courseIds),
+              ])
+            : [{ data: [], error: null }, { data: [], error: null }];
+          if (progressResponse.error) throw progressResponse.error;
+          if (attemptResponse.error) throw attemptResponse.error;
+
+          const enrollmentCourse = new Map(enrollmentsForCourses
+            .map((row) => [row.id, row.course_id]));
+          const completedByCourse = new Map();
+          (progressResponse.data || []).forEach((row) => {
+            const courseId = enrollmentCourse.get(row.enrollment_id);
+            if (courseId) {
+              completedByCourse.set(courseId, (completedByCourse.get(courseId) || 0) + 1);
+            }
+          });
+          const attemptsByCourse = new Map();
+          (attemptResponse.data || []).forEach((row) => {
+            const aggregate = attemptsByCourse.get(row.course_id) || { total: 0, count: 0 };
+            aggregate.total += Number(row.percentage) || 0;
+            aggregate.count += 1;
+            attemptsByCourse.set(row.course_id, aggregate);
+          });
+          setAdminAnalytics(courseRows.map((course) => {
+            const totalLessons = course.lessons?.length || 0;
+            const enrolledCount = enrollmentsForCourses
+              .filter((row) => row.course_id === course.id).length;
+            const attempts = attemptsByCourse.get(course.id);
+            return {
+              courseId: course.id,
+              enrolledCount,
+              completedChapters: completedByCourse.get(course.id) || 0,
+              possibleChapters: totalLessons * enrolledCount,
+              averageQuizScore: attempts?.count ? Math.round(attempts.total / attempts.count) : null,
+            };
+          }));
+        } else {
+          setAdminAnalytics([]);
+        }
+      } else if (studentId) {
         const { data: enrollmentRows, error: enrollmentError } = await supabase
           .from("course_enrollments")
           .select("id, course_id, enrolled_at")
@@ -325,37 +956,162 @@ export default function CoursesPage({ mode, studentData }) {
         const nextEnrollments = enrollmentRows || [];
         setEnrollments(nextEnrollments);
 
+        let progress = {};
+        let learningState = {};
+        let certificates = {};
+        let serverNotes = [];
         if (nextEnrollments.length) {
-          const progressResponse = await supabase
-            .from("course_lesson_progress")
-            .select("enrollment_id, lesson_id")
-            .in("enrollment_id", nextEnrollments.map((enrollment) => enrollment.id));
+          const enrollmentIds = nextEnrollments.map((enrollment) => enrollment.id);
+          const [progressResponse, stateResponse, notesResponse, certificateResponse] = await Promise.all([
+            supabase
+              .from("course_lesson_progress")
+              .select("enrollment_id, lesson_id")
+              .in("enrollment_id", enrollmentIds)
+              .eq("quiz_passed", true),
+            supabase
+              .from("course_learning_state")
+              .select("enrollment_id, last_lesson_id")
+              .in("enrollment_id", enrollmentIds),
+            supabase
+              .from("course_lesson_notes")
+              .select("enrollment_id, lesson_id, note, bookmarked")
+              .in("enrollment_id", enrollmentIds),
+            supabase
+              .from("course_certificates")
+              .select("id, enrollment_id, course_title, issued_at")
+              .in("enrollment_id", enrollmentIds),
+          ]);
           if (progressResponse.error) throw progressResponse.error;
-          const progress = {};
+          if (stateResponse.error) throw stateResponse.error;
+          if (notesResponse.error) throw notesResponse.error;
+          if (certificateResponse.error) throw certificateResponse.error;
+          progress = {};
           (progressResponse.data || []).forEach(({ enrollment_id, lesson_id }) => {
             (progress[enrollment_id] ||= new Set()).add(lesson_id);
           });
-          setCompletedByEnrollment(progress);
-        } else {
-          setCompletedByEnrollment({});
+          learningState = Object.fromEntries((stateResponse.data || [])
+            .map((row) => [row.enrollment_id, row]));
+          certificates = Object.fromEntries((certificateResponse.data || [])
+            .map((row) => [row.enrollment_id, row]));
+          serverNotes = notesResponse.data || [];
         }
+        setCompletedByEnrollment(progress);
+        setLearningStateByEnrollment(learningState);
+        setCertificatesByEnrollment(certificates);
+
+        let storedCourses = [];
+        try {
+          storedCourses = (await listOfflineCourses())
+            .filter((record) => record.studentId === String(studentId));
+        } catch (offlineStorageError) {
+          setError(`Offline course storage is unavailable: ${offlineStorageError.message}`);
+        }
+        setOfflineCourseRecords(storedCourses);
+
+        const mergedNotes = new Map(serverNotes.map((row) => [
+          `${row.enrollment_id}:${row.lesson_id}`,
+          row,
+        ]));
+        const pendingNotes = [];
+        storedCourses.forEach((record) => {
+          Object.entries(record.lessonNotes || {}).forEach(([lessonId, note]) => {
+            if (!record.enrollment?.id) return;
+            const key = `${record.enrollment.id}:${lessonId}`;
+            if (note.pendingSync) pendingNotes.push({ record, lessonId, note });
+            if (note.pendingSync || !mergedNotes.has(key)) {
+              mergedNotes.set(key, {
+                enrollment_id: record.enrollment.id,
+                lesson_id: lessonId,
+                note: note.note || "",
+                bookmarked: Boolean(note.bookmarked),
+                pendingSync: Boolean(note.pendingSync),
+              });
+            }
+          });
+        });
+        setLessonNotesByEnrollment(Object.fromEntries(mergedNotes));
+
+        if (pendingNotes.length) {
+          const syncResults = await Promise.all(pendingNotes.map(async ({ record, lessonId, note }) => {
+            const { error: syncError } = await supabase.from("course_lesson_notes").upsert({
+              enrollment_id: record.enrollment.id,
+              lesson_id: lessonId,
+              note: note.note || "",
+              bookmarked: Boolean(note.bookmarked),
+              updated_at: new Date().toISOString(),
+            }, { onConflict: "enrollment_id,lesson_id" });
+            return { record, lessonId, note, error: syncError };
+          }));
+          const failedSyncs = syncResults.filter((result) => result.error);
+          const updatedRecords = [...storedCourses];
+          for (const result of syncResults.filter((item) => !item.error)) {
+            const recordIndex = updatedRecords.findIndex((record) =>
+              record.courseId === result.record.courseId);
+            if (recordIndex < 0) continue;
+            const record = updatedRecords[recordIndex];
+            updatedRecords[recordIndex] = {
+              ...record,
+              lessonNotes: {
+                ...record.lessonNotes,
+                [result.lessonId]: { ...result.note, pendingSync: false },
+              },
+            };
+            try {
+              await saveOfflineCourse(updatedRecords[recordIndex]);
+            } catch (offlineStorageError) {
+              setError(`Offline note synced, but its local copy could not be updated: ${offlineStorageError.message}`);
+            }
+          }
+          setOfflineCourseRecords(updatedRecords);
+          if (failedSyncs.length) {
+            setError(`Some offline notes could not be synced: ${failedSyncs[0].error.message}`);
+          }
+        }
+      } else {
+        setEnrollments([]);
+        setCompletedByEnrollment({});
+        setLearningStateByEnrollment({});
+        setLessonNotesByEnrollment({});
+        setCertificatesByEnrollment({});
       }
     } catch (loadError) {
-      setError(`Courses could not be loaded: ${loadError.message || "Supabase request failed."}`);
+      try {
+        const restored = await restoreOfflineCourses();
+        if (!restored) {
+          setError(`Courses could not be loaded: ${loadError.message || "Supabase request failed."}`);
+        }
+      } catch (offlineError) {
+        setError(`Courses could not be loaded: ${loadError.message || "Supabase request failed."} Offline copy unavailable: ${offlineError.message}`);
+      }
     } finally {
       setLoading(false);
     }
-  }, [isAdmin, studentId]);
+  }, [isAdmin, restoreOfflineCourses, studentId]);
 
   useEffect(() => {
     loadCourses();
   }, [loadCourses]);
 
   useEffect(() => {
-    if (!supabase || !courses.length) {
+    const handleOnline = () => {
+      setIsOffline(false);
+      loadCourses();
+    };
+    const handleOffline = () => setIsOffline(true);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, [loadCourses]);
+
+  useEffect(() => {
+    if (!courses.length) {
       setCourseImageUrls({});
       return undefined;
     }
+    if (!supabase || isOffline) return undefined;
 
     let cancelled = false;
     const imagePaths = [...new Set(courses.flatMap((course) => getCourseImagePaths(course)))];
@@ -385,7 +1141,7 @@ export default function CoursesPage({ mode, studentData }) {
         }
       });
     return () => { cancelled = true; };
-  }, [courses]);
+  }, [courses, isOffline]);
 
   const enrollmentByCourse = useMemo(
     () => new Map(enrollments.map((enrollment) => [enrollment.course_id, enrollment])),
@@ -451,6 +1207,21 @@ export default function CoursesPage({ mode, studentData }) {
         : 0,
     };
   }, [courses, isAdmin, enrollmentByCourse, completedByEnrollment]);
+  const upcomingDeadlines = useMemo(() => {
+    const now = Date.now();
+    const reminderWindow = now + (7 * 24 * 60 * 60 * 1000);
+    return courses
+      .filter((course) => {
+        const enrollment = enrollmentByCourse.get(course.id);
+        const dueAt = Date.parse(course.due_at || "");
+        const progress = enrollment
+          ? courseProgress(course, completedByEnrollment[enrollment.id] || new Set())
+          : 100;
+        return enrollment && Number.isFinite(dueAt) && progress < 100
+          && (dueAt <= reminderWindow);
+      })
+      .sort((left, right) => Date.parse(left.due_at) - Date.parse(right.due_at));
+  }, [courses, enrollmentByCourse, completedByEnrollment]);
   const importPreviewRows = useMemo(() => {
     const existingTitles = new Set(courses.map((course) => course.title.trim().toLowerCase()));
     const seenTitles = new Set();
@@ -466,14 +1237,127 @@ export default function CoursesPage({ mode, studentData }) {
     ? completedByEnrollment[activeEnrollment.id] || new Set()
     : new Set();
   const activeLesson = activeCourse?.lessons?.find((lesson) => lesson.id === activeLessonId);
-  const activeQuizResult = activeLesson && quizResults[activeLesson.id];
-  const activeQuizAnswers = activeLesson && quizAnswers[activeLesson.id] || {};
+  const activeLessonIndex = activeCourse?.lessons?.findIndex((lesson) => lesson.id === activeLessonId) ?? -1;
+  const nextLesson = activeLessonIndex >= 0
+    ? activeCourse?.lessons?.[activeLessonIndex + 1]
+    : null;
+  const studentDisplayName = studentData?.full_name || studentData?.name || "Student";
+  const lessonQuizPreview = useMemo(
+    () => activeCourse && activeLesson
+      ? generateCourseQuiz({ ...activeCourse, lessons: [activeLesson] })
+      : [],
+    [activeCourse, activeLesson],
+  );
+  const activeQuizQuestion = lessonQuizQuestions[lessonQuizQuestionIndex];
+  const activeLessonNote = activeEnrollment && activeLesson
+    ? lessonNotesByEnrollment[`${activeEnrollment.id}:${activeLesson.id}`]
+    : null;
+  const activeCourseCertificate = activeEnrollment
+    ? certificatesByEnrollment[activeEnrollment.id]
+    : null;
+  const savedOfflineCourseIds = new Set(offlineCourseRecords.map((record) => record.courseId));
+
+  const unmetPrerequisites = (course) => (course.prerequisites || [])
+    .map((courseId) => courses.find((item) => item.id === courseId))
+    .filter((prerequisite) => {
+      if (!prerequisite) return true;
+      const enrollment = enrollmentByCourse.get(prerequisite.id);
+      return !enrollment
+        || courseProgress(prerequisite, completedByEnrollment[enrollment.id] || new Set()) < 100;
+    });
+
+  useEffect(() => {
+    setShowLessonQuiz(false);
+    setLessonQuizQuestions([]);
+    setLessonQuizQuestionIndex(0);
+    setLessonQuizAnswers({});
+    setLessonQuizCorrectionMode(false);
+    setLessonQuizCorrectionQuestions([]);
+    setLessonQuizCorrectionAnswers({});
+    setLessonQuizInitialAttemptId("");
+    setLessonQuizFirstAttemptScore(0);
+    setLessonQuizSubmitted(false);
+    setLessonQuizScore(0);
+    setLessonQuizPassed(false);
+  }, [activeCourseId, activeLessonId]);
+
+  useEffect(() => {
+    if (showLessonQuiz) {
+      lessonQuizPageRef.current?.scrollIntoView({ block: "start" });
+    }
+  }, [lessonQuizAttempt, lessonQuizQuestionIndex, showLessonQuiz]);
 
   useEffect(() => {
     if (!activeCourse || activeLessonId || isAdmin) return;
-    const firstLessonId = activeCourse.lessons?.[0]?.id;
-    if (firstLessonId) setActiveLessonId(firstLessonId);
-  }, [activeCourse, activeLessonId, isAdmin]);
+    const activeEnrollmentForCourse = enrollmentByCourse.get(activeCourse.id);
+    const lastLessonId = activeEnrollmentForCourse
+      ? learningStateByEnrollment[activeEnrollmentForCourse.id]?.last_lesson_id
+      : null;
+    const completed = activeEnrollmentForCourse
+      ? completedByEnrollment[activeEnrollmentForCourse.id] || new Set()
+      : new Set();
+    const lastIndex = (activeCourse.lessons || []).findIndex((lesson) => lesson.id === lastLessonId);
+    const nextIndex = (activeCourse.lessons || []).findIndex((lesson) => !completed.has(lesson.id));
+    const resumeIndex = lastIndex >= 0
+      && (lastIndex === 0 || (activeCourse.lessons || []).slice(0, lastIndex)
+        .every((lesson) => completed.has(lesson.id)))
+      ? lastIndex
+      : nextIndex >= 0 ? nextIndex : 0;
+    const lessonId = activeCourse.lessons?.[resumeIndex]?.id;
+    if (lessonId) setActiveLessonId(lessonId);
+  }, [activeCourse, activeLessonId, isAdmin, enrollmentByCourse, learningStateByEnrollment, completedByEnrollment]);
+
+  useEffect(() => {
+    if (isAdmin || !activeEnrollment || !activeLesson || !activeCourse) return;
+    if (learningStateByEnrollment[activeEnrollment.id]?.last_lesson_id === activeLesson.id) return;
+
+    const saveLastLesson = async () => {
+      if (isOffline || !supabase) {
+        setLearningStateByEnrollment((current) => ({
+          ...current,
+          [activeEnrollment.id]: { last_lesson_id: activeLesson.id },
+        }));
+        const savedRecord = offlineCourseRecords.find((record) =>
+          record.courseId === String(activeCourse.id));
+        if (savedRecord) {
+          await saveOfflineCourse({ ...savedRecord, lastLessonId: activeLesson.id });
+          setOfflineCourseRecords((current) => current.map((record) =>
+            record.courseId === String(activeCourse.id)
+              ? { ...record, lastLessonId: activeLesson.id }
+              : record));
+        }
+        return;
+      }
+
+      const { error: stateError } = await supabase
+        .from("course_learning_state")
+        .upsert({
+          enrollment_id: activeEnrollment.id,
+          last_lesson_id: activeLesson.id,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: "enrollment_id" });
+      if (stateError) {
+        setError(`Your last lesson could not be saved: ${stateError.message}`);
+        return;
+      }
+      setLearningStateByEnrollment((current) => ({
+        ...current,
+        [activeEnrollment.id]: { last_lesson_id: activeLesson.id },
+      }));
+    };
+
+    saveLastLesson().catch((saveError) => {
+      setError(`Your last lesson could not be saved: ${saveError.message || "Offline storage failed."}`);
+    });
+  }, [
+    activeCourse,
+    activeEnrollment,
+    activeLesson,
+    isAdmin,
+    isOffline,
+    learningStateByEnrollment,
+    offlineCourseRecords,
+  ]);
 
   const startNewCourse = () => setEditingCourse({
     id: "",
@@ -482,8 +1366,241 @@ export default function CoursesPage({ mode, studentData }) {
     subject: "",
     education_level: "all",
     is_published: true,
+    due_at: "",
+    prerequisites: [],
     lessons: [newLesson()],
   });
+
+  const openCourse = (course) => {
+    const enrollment = enrollmentByCourse.get(course.id);
+    const completed = enrollment
+      ? completedByEnrollment[enrollment.id] || new Set()
+      : new Set();
+    const lastLessonId = enrollment
+      ? learningStateByEnrollment[enrollment.id]?.last_lesson_id
+      : null;
+    const lastIndex = (course.lessons || []).findIndex((lesson) => lesson.id === lastLessonId);
+    const firstIncomplete = (course.lessons || []).findIndex((lesson) => !completed.has(lesson.id));
+    const lessonIndex = lastIndex >= 0
+      && (lastIndex === 0 || (course.lessons || []).slice(0, lastIndex)
+        .every((lesson) => completed.has(lesson.id)))
+      ? lastIndex
+      : firstIncomplete >= 0 ? firstIncomplete : 0;
+    setActiveCourseId(course.id);
+    setActiveLessonId(course.lessons?.[lessonIndex]?.id || "");
+    setShowLessonQuiz(false);
+  };
+
+  const saveCourseForOffline = async (course) => {
+    const enrollment = enrollmentByCourse.get(course.id);
+    if (!studentId || !enrollment) {
+      setError("Enroll in this course before saving it for offline use.");
+      return;
+    }
+
+    setError("");
+    try {
+      const imageUrls = Object.fromEntries(getCourseImagePaths(course)
+        .filter((path) => courseImageUrls[path])
+        .map((path) => [path, courseImageUrls[path]]));
+      const record = {
+        course,
+        enrollment,
+        studentId: String(studentId),
+        completedLessonIds: [...(completedByEnrollment[enrollment.id] || new Set())],
+        lastLessonId: learningStateByEnrollment[enrollment.id]?.last_lesson_id || null,
+        certificate: certificatesByEnrollment[enrollment.id] || null,
+        lessonNotes: Object.fromEntries((course.lessons || []).map((lesson) => [
+          lesson.id,
+          lessonNotesByEnrollment[`${enrollment.id}:${lesson.id}`] || {
+            note: "",
+            bookmarked: false,
+            pendingSync: false,
+          },
+        ])),
+        imageUrls,
+      };
+      await saveOfflineCourse(record);
+      let uncachedImageCount = 0;
+      if (Object.keys(imageUrls).length) {
+        try {
+          const imageCache = await globalThis.caches.open(COURSE_IMAGE_CACHE_NAME);
+          for (const imageUrl of Object.values(imageUrls)) {
+            try {
+              const response = await fetch(imageUrl);
+              if (!response.ok) throw new Error(`Image request returned ${response.status}.`);
+              await imageCache.put(imageUrl, response.clone());
+            } catch {
+              uncachedImageCount += 1;
+            }
+          }
+        } catch {
+          uncachedImageCount = Object.keys(imageUrls).length;
+        }
+      }
+      setOfflineCourseRecords((current) => [
+        ...current.filter((item) => item.courseId !== String(course.id)),
+        { ...record, courseId: String(course.id) },
+      ]);
+      setNotice(uncachedImageCount
+        ? `"${course.title}" is saved for offline reading. ${uncachedImageCount} image${uncachedImageCount === 1 ? "" : "s"} could not be cached.`
+        : `"${course.title}" is saved on this device for offline reading.`);
+    } catch (offlineError) {
+      setError(`Course could not be saved for offline use: ${offlineError.message}`);
+    }
+  };
+
+  const removeCourseOffline = async (course) => {
+    try {
+      const savedRecord = offlineCourseRecords.find((record) =>
+        record.courseId === String(course.id));
+      await removeOfflineCourse(course.id);
+      setOfflineCourseRecords((current) =>
+        current.filter((record) => record.courseId !== String(course.id)));
+      setNotice(`"${course.title}" was removed from this device's offline courses.`);
+      const imageUrlsInUse = new Set(offlineCourseRecords
+        .filter((record) => record.courseId !== String(course.id))
+        .flatMap((record) => Object.values(record.imageUrls || {})));
+      const removedImageUrls = Object.values(savedRecord?.imageUrls || {})
+        .filter((url) => !imageUrlsInUse.has(url));
+      if (removedImageUrls.length) {
+        try {
+          const imageCache = await globalThis.caches.open(COURSE_IMAGE_CACHE_NAME);
+          await Promise.all(removedImageUrls.map((url) => imageCache.delete(url)));
+        } catch (cacheError) {
+          setError(`Course was removed, but some cached images could not be removed: ${cacheError.message}`);
+        }
+      }
+    } catch (offlineError) {
+      setError(`Saved course could not be removed: ${offlineError.message}`);
+    }
+  };
+
+  const saveLessonNote = async (note, bookmarked) => {
+    if (!activeEnrollment || !activeLesson) return;
+    setError("");
+    const key = `${activeEnrollment.id}:${activeLesson.id}`;
+    const entry = {
+      enrollment_id: activeEnrollment.id,
+      lesson_id: activeLesson.id,
+      note: String(note || "").slice(0, 5000),
+      bookmarked: Boolean(bookmarked),
+      updated_at: new Date().toISOString(),
+    };
+    if (isOffline || !supabase) {
+      const savedRecord = offlineCourseRecords.find((record) =>
+        record.courseId === String(activeCourse?.id));
+      if (!savedRecord) {
+        setError("Save this course for offline use before editing notes without a connection.");
+        return;
+      }
+      const localEntry = { ...entry, pendingSync: true };
+      try {
+        await saveOfflineCourse({
+          ...savedRecord,
+          lessonNotes: { ...savedRecord.lessonNotes, [activeLesson.id]: localEntry },
+        });
+        setLessonNotesByEnrollment((current) => ({ ...current, [key]: localEntry }));
+        setOfflineCourseRecords((current) => current.map((record) =>
+          record.courseId === String(activeCourse.id)
+            ? { ...record, lessonNotes: { ...record.lessonNotes, [activeLesson.id]: localEntry } }
+            : record));
+        setNotice("Note saved on this device. It will sync when you reconnect.");
+      } catch (offlineError) {
+        setError(`Offline note could not be saved: ${offlineError.message}`);
+      }
+      return;
+    }
+
+    const { data, error: noteError } = await supabase
+      .from("course_lesson_notes")
+      .upsert(entry, { onConflict: "enrollment_id,lesson_id" })
+      .select("enrollment_id, lesson_id, note, bookmarked")
+      .single();
+    if (noteError) {
+      setError(`Lesson note could not be saved: ${noteError.message}`);
+      return;
+    }
+    setLessonNotesByEnrollment((current) => ({ ...current, [key]: data }));
+    const savedRecord = offlineCourseRecords.find((record) =>
+      record.courseId === String(activeCourse?.id));
+    if (savedRecord) {
+      try {
+        const updatedRecord = {
+          ...savedRecord,
+          lessonNotes: { ...savedRecord.lessonNotes, [activeLesson.id]: data },
+        };
+        await saveOfflineCourse(updatedRecord);
+        setOfflineCourseRecords((current) => current.map((record) =>
+          record.courseId === updatedRecord.courseId ? updatedRecord : record));
+      } catch (offlineError) {
+        setError(`Lesson note was saved online but not cached offline: ${offlineError.message}`);
+      }
+    }
+    setNotice(data.bookmarked ? "Lesson bookmark and note saved." : "Lesson note saved.");
+  };
+
+  const downloadCourseCertificate = async (course, enrollment) => {
+    if (!enrollment) return;
+    setError("");
+    try {
+      let certificate = certificatesByEnrollment[enrollment.id];
+      if (!certificate) {
+        if (!supabase || isOffline) {
+          throw new Error("No saved certificate is available offline. Reconnect and try again.");
+        }
+        const { data, error: certificateError } = await supabase
+          .from("course_certificates")
+          .select("id, enrollment_id, course_title, issued_at")
+          .eq("enrollment_id", enrollment.id)
+          .maybeSingle();
+        if (certificateError) throw certificateError;
+        if (!data) throw new Error("The completion certificate has not been issued yet.");
+        certificate = data;
+        setCertificatesByEnrollment((current) => ({
+          ...current,
+          [enrollment.id]: certificate,
+        }));
+      }
+
+      const pdf = new jsPDF({ orientation: "landscape" });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      pdf.setFillColor(239, 248, 250);
+      pdf.rect(12, 12, pageWidth - 24, 186, "F");
+      pdf.setDrawColor(22, 107, 139);
+      pdf.setLineWidth(1.2);
+      pdf.rect(18, 18, pageWidth - 36, 174);
+      pdf.setTextColor(18, 59, 112);
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(25);
+      pdf.text("CERTIFICATE OF COMPLETION", pageWidth / 2, 55, { align: "center" });
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(14);
+      pdf.text("This certifies that", pageWidth / 2, 78, { align: "center" });
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(24);
+      pdf.text(studentData?.full_name || studentData?.name || "Student", pageWidth / 2, 98, {
+        align: "center",
+        maxWidth: pageWidth - 50,
+      });
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(14);
+      pdf.text("has successfully completed", pageWidth / 2, 117, { align: "center" });
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(20);
+      pdf.text(certificate.course_title || course.title, pageWidth / 2, 137, {
+        align: "center",
+        maxWidth: pageWidth - 50,
+      });
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(10);
+      pdf.text(`Issued ${formatCourseDate(certificate.issued_at)} · Certificate ${certificate.id}`,
+        pageWidth / 2, 166, { align: "center", maxWidth: pageWidth - 50 });
+      pdf.save(`${course.title} - Certificate.pdf`.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-"));
+    } catch (certificateError) {
+      setError(`Certificate could not be downloaded: ${certificateError.message}`);
+    }
+  };
 
   const saveCourse = async (event) => {
     event.preventDefault();
@@ -501,6 +1618,12 @@ export default function CoursesPage({ mode, studentData }) {
     }
     if (!lessons.length) {
       setError("Add at least one lesson before saving the course.");
+      return;
+    }
+    const prerequisites = (editingCourse.prerequisites || []).filter(Boolean);
+    if (prerequisites.includes(editingCourse.id)
+      || createsPrerequisiteCycle(editingCourse.id, prerequisites, courses)) {
+      setError("Prerequisite courses cannot create a circular learning path.");
       return;
     }
     const invalidQuiz = lessons.flatMap((lesson, lessonIndex) =>
@@ -525,6 +1648,8 @@ export default function CoursesPage({ mode, studentData }) {
         subject: editingCourse.subject.trim(),
         education_level: editingCourse.education_level,
         is_published: editingCourse.is_published,
+        due_at: editingCourse.due_at ? new Date(editingCourse.due_at).toISOString() : null,
+        prerequisites: prerequisites.filter((id) => id !== editingCourse.id),
         lessons,
         updated_at: new Date().toISOString(),
       };
@@ -748,6 +1873,8 @@ export default function CoursesPage({ mode, studentData }) {
           subject: course.subject.trim(),
           education_level: importEducationLevel,
           is_published: course.is_published,
+          due_at: course.due_at ? new Date(course.due_at).toISOString() : null,
+          prerequisites: (course.prerequisites || []).filter(Boolean),
           cover_image_path: cover?.path || firstLessonImage,
           lessons,
           created_by: userData.user?.id || null,
@@ -779,6 +1906,8 @@ export default function CoursesPage({ mode, studentData }) {
       description: "Course description",
       subject: "Subject",
       is_published: true,
+      due_at: null,
+      prerequisites: [],
       lessons: [{
         title: "Lesson title",
         content: "Lesson content",
@@ -833,6 +1962,11 @@ export default function CoursesPage({ mode, studentData }) {
       setError("Your student account is not linked to a student record, so you cannot enroll yet.");
       return;
     }
+    const unmet = unmetPrerequisites(course);
+    if (unmet.length) {
+      setError(`Complete these prerequisite courses first: ${unmet.map((item) => item?.title || "Unavailable course").join(", ")}.`);
+      return;
+    }
     setError("");
     setNotice("");
     const { error: enrollmentError } = await supabase
@@ -846,108 +1980,158 @@ export default function CoursesPage({ mode, studentData }) {
     await loadCourses();
   };
 
-  const syncLessonCompletion = useCallback(async (lessonId) => {
-    if (!supabase || !activeEnrollment || !lessonId) return;
-    if (activeCompleted.has(lessonId)) return;
-    setError("");
-
-    try {
-      const { data: existingRows, error: lookupError } = await supabase
-        .from("course_lesson_progress")
-        .select("id")
-        .eq("enrollment_id", activeEnrollment.id)
-        .eq("lesson_id", lessonId)
-        .limit(1);
-
-      if (lookupError) throw lookupError;
-      if (existingRows?.length) {
-        setCompletedByEnrollment((current) => {
-          const next = { ...current };
-          next[activeEnrollment.id] = new Set(current[activeEnrollment.id] || []);
-          next[activeEnrollment.id].add(lessonId);
-          return next;
-        });
-        return;
-      }
-
-      const { error: insertError } = await supabase.from("course_lesson_progress").insert({
-        enrollment_id: activeEnrollment.id,
-        lesson_id: lessonId,
-      });
-
-      if (insertError) {
-        setError(`Progress could not be updated: ${insertError.message}`);
-        return;
-      }
-
-      setCompletedByEnrollment((current) => {
-        const next = { ...current };
-        next[activeEnrollment.id] = new Set(current[activeEnrollment.id] || []);
-        next[activeEnrollment.id].add(lessonId);
-        return next;
-      });
-    } catch (syncError) {
-      setError(`Progress could not be updated: ${syncError.message || "Supabase request failed."}`);
-    }
-  }, [activeCompleted, activeEnrollment, supabase]);
-
-  useEffect(() => {
-    if (!activeCourse || !activeLessonId) return;
-    if (isAdmin) return;
-    syncLessonCompletion(activeLessonId);
-  }, [activeCourse, activeLessonId, isAdmin, syncLessonCompletion]);
-
-  const toggleLessonComplete = async (lesson) => {
-    if (!supabase || !activeEnrollment) return;
-    setError("");
-    const wasCompleted = activeCompleted.has(lesson.id);
-    const result = wasCompleted
-      ? await supabase.from("course_lesson_progress")
-          .delete()
-          .eq("enrollment_id", activeEnrollment.id)
-          .eq("lesson_id", lesson.id)
-      : await supabase.from("course_lesson_progress")
-          .insert({ enrollment_id: activeEnrollment.id, lesson_id: lesson.id });
-    if (result.error) {
-      setError(`Progress could not be updated: ${result.error.message}`);
-      return;
-    }
-    setCompletedByEnrollment((current) => {
-      const next = { ...current, [activeEnrollment.id]: new Set(current[activeEnrollment.id] || []) };
-      if (wasCompleted) next[activeEnrollment.id].delete(lesson.id);
-      else next[activeEnrollment.id].add(lesson.id);
-      return next;
-    });
+  const startLessonQuiz = () => {
+    const previousOrder = lessonQuizQuestions.length ? lessonQuizQuestions : lessonQuizPreview;
+    setLessonQuizQuestions(shuffleQuizQuestions(lessonQuizPreview, previousOrder));
+    setLessonQuizQuestionIndex(0);
+    setLessonQuizAnswers({});
+    setLessonQuizCorrectionMode(false);
+    setLessonQuizCorrectionQuestions([]);
+    setLessonQuizCorrectionAnswers({});
+    setLessonQuizInitialAttemptId("");
+    setLessonQuizFirstAttemptScore(0);
+    setLessonQuizSubmitted(false);
+    setLessonQuizScore(0);
+    setLessonQuizPassed(false);
+    setLessonQuizAttempt((current) => current + 1);
+    setShowLessonQuiz(true);
   };
 
-  const submitLessonQuiz = (event) => {
+  const submitLessonQuiz = async (event) => {
     event.preventDefault();
-    if (!activeLesson?.quiz?.length) return;
-    const unanswered = activeLesson.quiz.find((question) => !activeQuizAnswers[question.id]);
-    if (unanswered) {
-      setError("Answer every question before checking your quiz.");
+    if (!supabase || !studentId || !activeEnrollment || !activeCourse || !activeLesson) {
+      setError("Your student account could not be linked to this course quiz.");
       return;
     }
-    setError("");
-    const score = activeLesson.quiz.filter((question) =>
-      activeQuizAnswers[question.id] === question.correctOptionId).length;
-    setQuizResults((current) => ({
-      ...current,
-      [activeLesson.id]: { score, total: activeLesson.quiz.length },
-    }));
-  };
+    if (!lessonQuizQuestions.length) {
+      setError("This chapter does not have enough content to create a quiz.");
+      return;
+    }
+    if (lessonQuizCorrectionMode
+      && (!lessonQuizInitialAttemptId
+        || !lessonQuizCorrectionQuestions.length
+        || lessonQuizCorrectionQuestions.some((question) => !lessonQuizCorrectionAnswers[question.id]))) {
+      setError("Answer every correction before submitting the resit.");
+      return;
+    }
+    if (!lessonQuizCorrectionMode
+      && Object.keys(lessonQuizAnswers).length < lessonQuizQuestions.length) {
+      setError("Answer every quiz question before submitting.");
+      return;
+    }
 
-  const setLessonQuizAnswer = (questionId, optionId) => {
-    if (!activeLesson) return;
-    setQuizAnswers((current) => ({
-      ...current,
-      [activeLesson.id]: { ...(current[activeLesson.id] || {}), [questionId]: optionId },
-    }));
-    setQuizResults((current) => {
-      const next = { ...current };
-      delete next[activeLesson.id];
-      return next;
-    });
+    const firstAttemptCorrectCount = lessonQuizQuestions.filter((question) =>
+      lessonQuizAnswers[question.id] === question.correctOptionId).length;
+    const correctionCorrectCount = lessonQuizCorrectionQuestions.filter((question) =>
+      lessonQuizCorrectionAnswers[question.id] === question.correctOptionId).length;
+    const attemptCorrectCount = lessonQuizCorrectionMode
+      ? correctionCorrectCount
+      : firstAttemptCorrectCount;
+    const attemptQuestionCount = lessonQuizCorrectionMode
+      ? lessonQuizCorrectionQuestions.length
+      : lessonQuizQuestions.length;
+    const attempt = {
+      student_id: studentId,
+      enrollment_id: activeEnrollment.id,
+      course_id: activeCourse.id,
+      lesson_id: activeLesson.id,
+      course_title: activeCourse.title,
+      lesson_title: activeLesson.title,
+      correct_count: attemptCorrectCount,
+      total_questions: attemptQuestionCount,
+      percentage: Math.round((attemptCorrectCount / attemptQuestionCount) * 100),
+      attempt_type: lessonQuizCorrectionMode ? "resit" : "initial",
+      resit_of_attempt_id: lessonQuizCorrectionMode ? lessonQuizInitialAttemptId : null,
+    };
+
+    setSavingLessonQuiz(true);
+    setError("");
+    try {
+      const { data: savedAttempt, error: attemptError } = await supabase
+        .from("course_quiz_attempts")
+        .insert(attempt)
+        .select("id, course_id, lesson_id, course_title, lesson_title, correct_count, total_questions, percentage, created_at, attempt_type, resit_of_attempt_id")
+        .single();
+      if (attemptError) throw attemptError;
+
+      if (!lessonQuizCorrectionMode) {
+        const incorrectQuestions = lessonQuizQuestions.filter((question) =>
+          lessonQuizAnswers[question.id] !== question.correctOptionId);
+        onPracticeScoreSaved?.(savedAttempt);
+        if (incorrectQuestions.length) {
+          setLessonQuizFirstAttemptScore(firstAttemptCorrectCount);
+          setLessonQuizCorrectionQuestions(incorrectQuestions);
+          setLessonQuizCorrectionAnswers({});
+          setLessonQuizInitialAttemptId(savedAttempt.id);
+          setLessonQuizCorrectionMode(true);
+          setLessonQuizAttempt((current) => current + 1);
+          return;
+        }
+      }
+
+      const finalCorrectCount = lessonQuizCorrectionMode
+        ? lessonQuizFirstAttemptScore + correctionCorrectCount
+        : firstAttemptCorrectCount;
+      const passed = isPassingScore(finalCorrectCount, lessonQuizQuestions.length);
+      let nextCompleted = activeCompleted;
+      if (passed && !activeCompleted.has(activeLesson.id)) {
+        const { error: progressError } = await supabase
+          .from("course_lesson_progress")
+          .upsert({
+            enrollment_id: activeEnrollment.id,
+            lesson_id: activeLesson.id,
+            quiz_passed: true,
+          }, { onConflict: "enrollment_id,lesson_id" });
+        if (progressError) {
+          setError(`Quiz score was saved, but progress could not be updated: ${progressError.message}`);
+        } else {
+          nextCompleted = new Set(activeCompleted);
+          nextCompleted.add(activeLesson.id);
+          setCompletedByEnrollment((current) => ({
+            ...current,
+            [activeEnrollment.id]: nextCompleted,
+          }));
+        }
+      }
+
+      setLessonQuizScore(finalCorrectCount);
+      setLessonQuizSubmitted(true);
+      setLessonQuizPassed(passed);
+      if (lessonQuizCorrectionMode) onPracticeScoreSaved?.(savedAttempt);
+
+      if (nextCompleted !== activeCompleted) {
+        const progressItems = courses
+          .filter((course) => course.is_published && enrollmentByCourse.has(course.id))
+          .map((course) => {
+            const enrollment = enrollmentByCourse.get(course.id);
+            const completed = enrollment.id === activeEnrollment.id
+              ? nextCompleted
+              : completedByEnrollment[enrollment.id] || new Set();
+            const totalLessons = course.lessons?.length || 0;
+            const completedCount = (course.lessons || [])
+              .filter((lesson) => completed.has(lesson.id)).length;
+            return {
+              courseId: course.id,
+              title: course.title || "Course",
+              percent: totalLessons ? Math.round((completedCount / totalLessons) * 100) : 0,
+              completedCount,
+              totalLessons,
+            };
+          });
+        onCourseProgressUpdated?.({
+          enrolledCount: progressItems.length,
+          completedCount: progressItems.filter((item) => item.percent >= 100).length,
+          averageCompletion: progressItems.length
+            ? Math.round(progressItems.reduce((sum, item) => sum + item.percent, 0) / progressItems.length)
+            : 0,
+          progressItems,
+        });
+      }
+    } catch (submitError) {
+      setError(`Quiz score could not be saved: ${submitError.message || "Supabase request failed."}`);
+    } finally {
+      setSavingLessonQuiz(false);
+    }
   };
 
   const courseFilters = (
@@ -1043,6 +2227,25 @@ export default function CoursesPage({ mode, studentData }) {
 
       {error && <div className="alert alert-danger" role="alert">{error}</div>}
       {notice && <div className="alert alert-success" role="status">{notice}</div>}
+      {!isAdmin && upcomingDeadlines.length > 0 && (
+        <section className="courses-deadline-reminders" aria-labelledby="course-deadline-heading">
+          <div>
+            <span className="courses-eyebrow">COURSE REMINDERS</span>
+            <h2 id="course-deadline-heading">Upcoming deadlines</h2>
+          </div>
+          <ul>
+            {upcomingDeadlines.map((course) => {
+              const overdue = Date.parse(course.due_at) < Date.now();
+              return (
+                <li key={course.id} className={overdue ? "is-overdue" : ""}>
+                  <strong>{course.title}</strong>
+                  <span>{overdue ? "Overdue" : "Due"} · {formatCourseDate(course.due_at)}</span>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
       {isAdmin && (
         <div className="courses-import-help">
           <label>
@@ -1162,6 +2365,11 @@ export default function CoursesPage({ mode, studentData }) {
                           onChange={(event) => updateCourse({ is_published: event.target.checked })} />
                         Available to students after import
                       </label>
+                      <label>Course deadline
+                        <input className="form-control" type="datetime-local" disabled={disabled}
+                          value={toDateTimeInputValue(entry.course.due_at)}
+                          onChange={(event) => updateCourse({ due_at: event.target.value })} />
+                      </label>
                     </div>
                     <div className="courses-import-lessons-heading">
                       <strong>Lessons ({entry.course.lessons.length})</strong>
@@ -1268,6 +2476,24 @@ export default function CoursesPage({ mode, studentData }) {
                     onChange={(event) => setEditingCourse({ ...editingCourse, is_published: event.target.checked })} />
                   Available to students
                 </label>
+                <label>Course deadline
+                  <input className="form-control" type="datetime-local"
+                    value={toDateTimeInputValue(editingCourse.due_at)}
+                    onChange={(event) => setEditingCourse({ ...editingCourse, due_at: event.target.value })} />
+                </label>
+                <label>Prerequisite courses
+                  <select className="form-control" multiple
+                    value={editingCourse.prerequisites || []}
+                    onChange={(event) => setEditingCourse({
+                      ...editingCourse,
+                      prerequisites: [...event.target.selectedOptions].map((option) => option.value),
+                    })}>
+                    {courses.filter((course) => course.id !== editingCourse.id).map((course) => (
+                      <option key={course.id} value={course.id}>{course.title}</option>
+                    ))}
+                  </select>
+                  <small>Select courses learners must complete before they can enroll.</small>
+                </label>
               </div>
               <label className="courses-description">Course description
                 <textarea className="form-control" rows="3" value={editingCourse.description}
@@ -1307,6 +2533,13 @@ export default function CoursesPage({ mode, studentData }) {
                       lessons: editingCourse.lessons.map((item) =>
                         item.id === lesson.id ? { ...item, quiz } : item),
                     })} />
+                  {editingCourse.id && (
+                    <CourseDiscussions
+                      courseId={editingCourse.id}
+                      lessonId={lesson.id}
+                      isAdmin
+                    />
+                  )}
                 </section>
               ))}
               <button className="btn btn-blue" type="submit" disabled={saving}>
@@ -1314,6 +2547,38 @@ export default function CoursesPage({ mode, studentData }) {
               </button>
             </form>
           )}
+
+          <section className="courses-admin-analytics" aria-labelledby="course-analytics-heading">
+            <div className="courses-editor-heading">
+              <div>
+                <span className="courses-eyebrow">INSTRUCTOR INSIGHTS</span>
+                <h2 id="course-analytics-heading">Course progress analytics</h2>
+              </div>
+              <span>Aggregated student progress and quiz results</span>
+            </div>
+            <div className="courses-analytics-grid">
+              {courses.map((course) => {
+                const analytics = adminAnalytics.find((item) => item.courseId === course.id);
+                return (
+                  <article key={course.id}>
+                    <strong>{course.title}</strong>
+                    <span>{analytics?.enrolledCount ?? "—"} enrolled</span>
+                    <span>
+                      {analytics?.possibleChapters
+                        ? `${analytics.completedChapters} of ${analytics.possibleChapters} chapter completions`
+                        : "No chapter completions"}
+                    </span>
+                    <span>
+                      {analytics?.averageQuizScore === null || analytics?.averageQuizScore === undefined
+                        ? "No quiz attempts"
+                        : `${analytics.averageQuizScore}% mean quiz attempt score`}
+                    </span>
+                  </article>
+                );
+              })}
+              {!courses.length && <p>Create a course to see learning analytics.</p>}
+            </div>
+          </section>
 
           <div className="courses-list-heading">
             <h2>Course library</h2>
@@ -1360,8 +2625,215 @@ export default function CoursesPage({ mode, studentData }) {
           )}
         </>
       ) : activeCourse ? (
-        <section className="courses-player">
-          <button className="btn btn-outline" type="button" onClick={() => { setActiveCourseId(""); setActiveLessonId(""); }}>
+        showLessonQuiz ? (
+          <section className="courses-chapter-quiz-page">
+            <button className="btn btn-outline courses-quiz-back" type="button"
+              onClick={() => setShowLessonQuiz(false)} disabled={savingLessonQuiz}>
+              Back to chapter
+            </button>
+            <div className="card card-padded courses-chapter-quiz-card">
+              <span className="courses-eyebrow">
+                {lessonQuizCorrectionMode ? "QUIZ RESIT" : "CHAPTER QUIZ"}
+              </span>
+              <h2>{activeLesson?.title}</h2>
+              <p className="courses-chapter-quiz-intro">
+                {lessonQuizCorrectionMode
+                  ? `Your first attempt scored ${lessonQuizFirstAttemptScore} of ${lessonQuizQuestions.length}. Correct only the questions below. These corrections are a resit; your final score keeps your original correct answers and adds correct resit answers.`
+                  : "Answer all questions. Any incorrect answers will be collected for corrections after you submit the full quiz."}
+              </p>
+              {lessonQuizQuestions.length ? (
+                <form onSubmit={submitLessonQuiz}>
+                  {!lessonQuizCorrectionMode && !lessonQuizSubmitted && activeQuizQuestion && (
+                    <>
+                      <div className="courses-quiz-question-progress" aria-live="polite">
+                        <span>Question {lessonQuizQuestionIndex + 1} of {lessonQuizQuestions.length}</span>
+                        <div
+                          role="progressbar"
+                          aria-valuemin={0}
+                          aria-valuemax={lessonQuizQuestions.length}
+                          aria-valuenow={lessonQuizQuestionIndex + 1}
+                          aria-label="Quiz progress"
+                        >
+                          <span style={{
+                            width: `${((lessonQuizQuestionIndex + 1) / lessonQuizQuestions.length) * 100}%`,
+                          }} />
+                        </div>
+                      </div>
+                      <fieldset className="courses-practice-question" key={activeQuizQuestion.id}>
+                        <legend>{lessonQuizQuestionIndex + 1}. {activeQuizQuestion.prompt}</legend>
+                        {activeQuizQuestion.options.map((option) => (
+                          <label className="courses-practice-option" key={option.id}>
+                            <input
+                              type="radio"
+                              name={`chapter-answer-${activeQuizQuestion.id}`}
+                              value={option.id}
+                              checked={lessonQuizAnswers[activeQuizQuestion.id] === option.id}
+                              disabled={lessonQuizSubmitted || savingLessonQuiz}
+                              onChange={() => setLessonQuizAnswers((current) => ({
+                                ...current,
+                                [activeQuizQuestion.id]: option.id,
+                              }))}
+                            />
+                            <span>{option.text}</span>
+                          </label>
+                        ))}
+                      </fieldset>
+                      <div className="courses-quiz-navigation">
+                        {lessonQuizQuestionIndex > 0 ? (
+                          <button className="btn btn-outline" type="button" onClick={() => {
+                            setLessonQuizQuestionIndex((index) => index - 1);
+                          }}>
+                            Previous question
+                          </button>
+                        ) : <span />}
+                        {lessonQuizQuestionIndex < lessonQuizQuestions.length - 1 ? (
+                          <button
+                            className="btn btn-blue"
+                            type="button"
+                            disabled={!lessonQuizAnswers[activeQuizQuestion.id]}
+                            onClick={() => setLessonQuizQuestionIndex((index) => index + 1)}
+                          >
+                            Next question
+                          </button>
+                        ) : (
+                          <button
+                            className="btn btn-blue"
+                            type="submit"
+                            disabled={savingLessonQuiz
+                              || Object.keys(lessonQuizAnswers).length < lessonQuizQuestions.length}
+                          >
+                            {savingLessonQuiz ? "Saving score…" : "Submit chapter quiz"}
+                          </button>
+                        )}
+                      </div>
+                    </>
+                  )}
+                  {lessonQuizCorrectionMode && !lessonQuizSubmitted && (
+                    <>
+                      <p className="courses-chapter-quiz-intro">
+                        {lessonQuizCorrectionQuestions.length} question{lessonQuizCorrectionQuestions.length === 1 ? "" : "s"} need correction.
+                      </p>
+                      {lessonQuizCorrectionQuestions.map((question) => {
+                        const originalIndex = lessonQuizQuestions
+                          .findIndex((item) => item.id === question.id);
+                        return (
+                          <fieldset className="courses-practice-question" key={question.id}>
+                            <legend>Question {originalIndex + 1}. {question.prompt}</legend>
+                            {question.options.map((option) => (
+                              <label className="courses-practice-option" key={option.id}>
+                                <input
+                                  type="radio"
+                                  name={`chapter-correction-${question.id}`}
+                                  value={option.id}
+                                  checked={lessonQuizCorrectionAnswers[question.id] === option.id}
+                                  disabled={savingLessonQuiz}
+                                  onChange={() => setLessonQuizCorrectionAnswers((current) => ({
+                                    ...current,
+                                    [question.id]: option.id,
+                                  }))}
+                                />
+                                <span>{option.text}</span>
+                              </label>
+                            ))}
+                          </fieldset>
+                        );
+                      })}
+                      <button
+                        className="btn btn-blue"
+                        type="submit"
+                        disabled={savingLessonQuiz
+                          || lessonQuizCorrectionQuestions.some(
+                            (question) => !lessonQuizCorrectionAnswers[question.id],
+                          )}
+                      >
+                        {savingLessonQuiz ? "Saving resit…" : "Submit corrections"}
+                      </button>
+                    </>
+                  )}
+                  {lessonQuizSubmitted && (
+                    <p className="courses-quiz-result" role="status">
+                      {lessonQuizCorrectionMode
+                        ? `First attempt: ${lessonQuizFirstAttemptScore} of ${lessonQuizQuestions.length}. Resit: ${lessonQuizScore - lessonQuizFirstAttemptScore} of ${lessonQuizCorrectionQuestions.length} corrections correct. Final score: ${lessonQuizScore} of ${lessonQuizQuestions.length} (${Math.round((lessonQuizScore / lessonQuizQuestions.length) * 100)}%).`
+                        : `You scored ${lessonQuizScore} of ${lessonQuizQuestions.length} (${Math.round((lessonQuizScore / lessonQuizQuestions.length) * 100)}%). Your score has been saved.`}
+                    </p>
+                  )}
+                  {lessonQuizSubmitted && (
+                    <section className="courses-quiz-review" aria-labelledby="quiz-review-heading">
+                      <h3 id="quiz-review-heading">Review your answers</h3>
+                      {lessonQuizQuestions.map((question, index) => {
+                        const correctionAnswer = lessonQuizCorrectionQuestions
+                          .some((item) => item.id === question.id)
+                          ? lessonQuizCorrectionAnswers[question.id]
+                          : "";
+                        const answerId = correctionAnswer || lessonQuizAnswers[question.id];
+                        const selectedOption = question.options.find((option) => option.id === answerId);
+                        const correctOption = question.options.find(
+                          (option) => option.id === question.correctOptionId,
+                        );
+                        const isCorrect = answerId === question.correctOptionId;
+                        return (
+                          <article className={isCorrect ? "is-correct" : "needs-review"} key={question.id}>
+                            <strong>Question {index + 1} · {isCorrect ? "Correct" : "Review this answer"}</strong>
+                            <p>{question.prompt}</p>
+                            <span>Your answer: {selectedOption?.text || "No answer"}</span>
+                            {!isCorrect && <span>Correct answer: {correctOption?.text || "Unavailable"}</span>}
+                            {question.explanation && <p>{question.explanation}</p>}
+                          </article>
+                        );
+                      })}
+                    </section>
+                  )}
+                  {lessonQuizSubmitted && (
+                    lessonQuizPassed ? (
+                      <>
+                        <p className="courses-quiz-result" role="status">
+                          {activeCompleted.has(activeLesson?.id)
+                            ? `Congratulations, ${studentDisplayName}! You passed the chapter quiz. ${
+                                nextLesson
+                                  ? "The next chapter is now unlocked."
+                                  : "You completed the final chapter."
+                              }`
+                            : `Congratulations, ${studentDisplayName}! You passed, but progress could not be saved, so the next chapter remains locked.`}
+                        </p>
+                        {activeCompleted.has(activeLesson?.id) && nextLesson ? (
+                          <button className="btn btn-blue" type="button" onClick={() => {
+                            setActiveLessonId(nextLesson.id);
+                            setShowLessonQuiz(false);
+                          }}>
+                            Continue to next chapter
+                          </button>
+                        ) : (
+                          <button className="btn btn-outline" type="button"
+                            onClick={() => setShowLessonQuiz(false)}>
+                            Back to chapter
+                          </button>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <p className="courses-quiz-generation-error" role="status">
+                          Score at least {PASSMARK_PERCENTAGE}% to pass and unlock the next chapter.
+                        </p>
+                        <button className="btn btn-outline" type="button" onClick={startLessonQuiz}>
+                          Try again
+                        </button>
+                      </>
+                    )
+                  )}
+                </form>
+              ) : (
+                <p className="courses-quiz-generation-error" role="status">
+                  A quiz is not available for this chapter yet. Ask your instructor to add quiz questions or more lesson content.
+                </p>
+              )}
+            </div>
+          </section>
+        ) : (
+          <section className="courses-player">
+          <button className="btn btn-outline" type="button" onClick={() => {
+            setActiveCourseId("");
+            setActiveLessonId("");
+          }} disabled={savingLessonQuiz}>
             All courses
           </button>
           <div className="courses-player-layout">
@@ -1369,6 +2841,22 @@ export default function CoursesPage({ mode, studentData }) {
               <span className="courses-eyebrow">{levelName(activeCourse.education_level)}</span>
               <h2>{activeCourse.title}</h2>
               <p>{activeCourse.description}</p>
+              <p className="courses-course-duration">
+                Estimated completion time: {formatCourseDuration(estimateCourseDurationMinutes(activeCourse))}
+              </p>
+              {activeCourse.due_at && (
+                <p className="courses-card-deadline">Deadline · {formatCourseDate(activeCourse.due_at)}</p>
+              )}
+              {activeEnrollment && (
+                <button className="btn btn-outline" type="button"
+                  onClick={() => savedOfflineCourseIds.has(String(activeCourse.id))
+                    ? removeCourseOffline(activeCourse)
+                    : saveCourseForOffline(activeCourse)}>
+                  {savedOfflineCourseIds.has(String(activeCourse.id))
+                    ? "Remove offline copy"
+                    : "Save course offline"}
+                </button>
+              )}
               <div className="courses-progress">
                 <div className="courses-progress-label">
                   <strong>Course progress</strong>
@@ -1379,18 +2867,28 @@ export default function CoursesPage({ mode, studentData }) {
                 </div>
               </div>
               <ol>
-                {(activeCourse.lessons || []).map((lesson, index) => (
-                  <li key={lesson.id}>
-                    <button type="button" className={lesson.id === activeLessonId ? "is-active" : ""}
-                      onClick={() => {
-                        setActiveLessonId(lesson.id);
-                        syncLessonCompletion(lesson.id);
-                      }}>
-                      <span>{activeCompleted.has(lesson.id) ? "Done" : index + 1}</span>
-                      {lesson.title}
-                    </button>
-                  </li>
-                ))}
+                {(activeCourse.lessons || []).map((lesson, index) => {
+                  const unlocked = index === 0 || (activeCourse.lessons || [])
+                    .slice(0, index)
+                    .every((previousLesson) => activeCompleted.has(previousLesson.id));
+                  return (
+                    <li key={lesson.id}>
+                      <button
+                        type="button"
+                        className={lesson.id === activeLessonId ? "is-active" : ""}
+                        onClick={() => setActiveLessonId(lesson.id)}
+                        disabled={!unlocked || savingLessonQuiz}
+                      >
+                        <span>
+                          {lessonNotesByEnrollment[`${activeEnrollment?.id}:${lesson.id}`]?.bookmarked
+                            ? "★"
+                            : activeCompleted.has(lesson.id) ? "Done" : unlocked ? index + 1 : "Locked"}
+                        </span>
+                        {lesson.title}
+                      </button>
+                    </li>
+                  );
+                })}
               </ol>
             </aside>
             <article className="card card-padded courses-lesson-content">
@@ -1398,73 +2896,108 @@ export default function CoursesPage({ mode, studentData }) {
                 <>
                   <span className="courses-eyebrow">{activeCourse.subject || "COURSE LESSON"}</span>
                   <h2>{activeLesson.title}</h2>
-                  <div className="courses-lesson-text">{activeLesson.content}</div>
+                  <div className="courses-lesson-actions">
+                    <button className="btn btn-outline" type="button"
+                      onClick={() => downloadLessonNotes(activeCourse, activeLesson)}>
+                      Download lesson notes
+                    </button>
+                  </div>
+                  <div className="courses-lesson-text">
+                    {renderCourseLessonContent(activeLesson.content)}
+                  </div>
                   <CourseImageGallery images={activeLesson.images} imageUrls={courseImageUrls} />
-                  {Array.isArray(activeLesson.quiz) && !!activeLesson.quiz.length && (
-                    <form className="courses-practice-quiz" onSubmit={submitLessonQuiz}>
-                      <div>
-                        <span className="courses-eyebrow">PRACTICE</span>
-                        <h3>Knowledge check</h3>
-                        <p>Check your understanding. This practice score is not saved.</p>
-                      </div>
-                      {activeLesson.quiz.map((question, questionIndex) => {
-                        const selectedOption = activeQuizAnswers[question.id];
-                        return (
-                          <fieldset className="courses-practice-question" key={question.id}>
-                            <legend>{questionIndex + 1}. {question.prompt}</legend>
-                            {(Array.isArray(question.options) ? question.options : [])
-                              .filter((option) => typeof option.text === "string" && option.text.trim())
-                              .map((option) => (
-                              <label className={`courses-practice-option ${
-                                activeQuizResult
-                                  ? option.id === question.correctOptionId
-                                    ? "is-correct"
-                                    : selectedOption === option.id ? "is-incorrect" : ""
-                                  : ""
-                              }`} key={option.id}>
-                                <input type="radio" name={`answer-${question.id}`}
-                                  value={option.id} checked={selectedOption === option.id}
-                                  onChange={() => setLessonQuizAnswer(question.id, option.id)} />
-                                <span>{option.text}</span>
-                              </label>
-                            ))}
-                          </fieldset>
-                        );
-                      })}
-                      {activeQuizResult && (
-                        <p className="courses-quiz-result" role="status">
-                          You scored {activeQuizResult.score} of {activeQuizResult.total}.
-                        </p>
-                      )}
-                      <button className="btn btn-blue" type="submit" disabled={!!activeQuizResult}>
-                        Check answers
+                  {!isAdmin && activeEnrollment && (
+                    <section className="courses-personal-notes" aria-labelledby="personal-notes-heading">
+                      <label className="courses-bookmark-toggle">
+                        <input type="checkbox" checked={Boolean(activeLessonNote?.bookmarked)}
+                          onChange={(event) => setLessonNotesByEnrollment((current) => ({
+                            ...current,
+                            [`${activeEnrollment.id}:${activeLesson.id}`]: {
+                              ...activeLessonNote,
+                              note: activeLessonNote?.note || "",
+                              bookmarked: event.target.checked,
+                              pendingSync: isOffline,
+                            },
+                          }))} />
+                        Bookmark this lesson
+                      </label>
+                      <label id="personal-notes-heading">
+                        My private lesson notes
+                        <textarea className="form-control" rows="4" maxLength={5000}
+                          value={activeLessonNote?.note || ""}
+                          onChange={(event) => setLessonNotesByEnrollment((current) => ({
+                            ...current,
+                            [`${activeEnrollment.id}:${activeLesson.id}`]: {
+                              ...activeLessonNote,
+                              note: event.target.value,
+                              bookmarked: Boolean(activeLessonNote?.bookmarked),
+                              pendingSync: isOffline,
+                            },
+                          }))} />
+                      </label>
+                      <button className="btn btn-outline" type="button"
+                        onClick={() => saveLessonNote(activeLessonNote?.note, activeLessonNote?.bookmarked)}>
+                        {isOffline ? "Save note on this device" : "Save note and bookmark"}
                       </button>
-                      {activeQuizResult && (
-                        <button className="btn btn-outline" type="button" onClick={() => {
-                          setQuizResults((current) => {
-                            const next = { ...current };
-                            delete next[activeLesson.id];
-                            return next;
-                          });
-                          setQuizAnswers((current) => {
-                            const next = { ...current };
-                            delete next[activeLesson.id];
-                            return next;
-                          });
-                        }}>Try again</button>
-                      )}
-                    </form>
+                    </section>
                   )}
                   <div className="courses-lesson-progress-note">
-                    Progress updates automatically as you study this lesson.
+                    Score at least {PASSMARK_PERCENTAGE}% on the chapter quiz below to unlock the next chapter.
                   </div>
+                  {!isAdmin && activeEnrollment && (
+                    <section className="courses-practice-quiz" aria-labelledby="chapter-quiz-title">
+                      <div>
+                        <span className="courses-eyebrow">CHAPTER CHECK-IN</span>
+                        <h3 id="chapter-quiz-title">Ready to check this chapter?</h3>
+                        <p>Score at least {PASSMARK_PERCENTAGE}% to pass, save your progress, and unlock the next chapter.</p>
+                      </div>
+                      {isOffline ? (
+                        <p role="status">Quiz attempts need an internet connection. Your saved lesson is available to read offline.</p>
+                      ) : lessonQuizPreview.length ? (
+                        <button className="btn btn-blue" type="button"
+                          onClick={startLessonQuiz}>
+                          Take chapter quiz
+                        </button>
+                      ) : (
+                        <p className="courses-quiz-generation-error" role="status">
+                          A quiz is not available for this chapter yet. Ask your instructor to add quiz questions or more lesson content.
+                        </p>
+                      )}
+                    </section>
+                  )}
+                  {!isAdmin && activeEnrollment && (
+                    isOffline
+                      ? <p className="courses-offline-note">Discussion is unavailable offline. Your saved lesson notes remain on this device.</p>
+                      : <CourseDiscussions
+                          courseId={activeCourse.id}
+                          lessonId={activeLesson.id}
+                          isAdmin={false}
+                        />
+                  )}
+                  {!isAdmin && activeEnrollment && courseProgress(activeCourse, activeCompleted) === 100 && (
+                    <section className="courses-certificate-card" aria-label="Course completion certificate">
+                      <div>
+                        <strong>Course complete</strong>
+                        <span>
+                          {activeCourseCertificate
+                            ? `Certificate issued ${formatCourseDate(activeCourseCertificate.issued_at)}`
+                            : "Your completion certificate is ready."}
+                        </span>
+                      </div>
+                      <button className="btn btn-blue" type="button"
+                        onClick={() => downloadCourseCertificate(activeCourse, activeEnrollment)}>
+                        Download certificate
+                      </button>
+                    </section>
+                  )}
                 </>
               ) : (
                 <div className="courses-empty">Choose a lesson to start studying.</div>
               )}
             </article>
           </div>
-        </section>
+          </section>
+        )
       ) : (
         <>
           {courseFilters}
@@ -1482,6 +3015,8 @@ export default function CoursesPage({ mode, studentData }) {
           <div className="courses-grid">
             {visibleCourses.map((course) => {
               const enrollment = enrollmentByCourse.get(course.id);
+              const unmet = enrollment ? [] : unmetPrerequisites(course);
+              const offlineSaved = savedOfflineCourseIds.has(String(course.id));
               const complete = enrollment
                 ? courseProgress(course, completedByEnrollment[enrollment.id] || new Set())
                 : 0;
@@ -1492,17 +3027,48 @@ export default function CoursesPage({ mode, studentData }) {
                   <h3>{course.title}</h3>
                   {course.subject && <div className="courses-subject">{course.subject}</div>}
                   <p>{courseDescription(course.description, "Explore the lessons in this course.")}</p>
+                  {!!course.due_at && (
+                    <small className="courses-card-deadline">Deadline · {formatCourseDate(course.due_at)}</small>
+                  )}
+                  {!!(course.prerequisites || []).length && (
+                    <div className="courses-prerequisite-note">
+                      <strong>Prerequisites:</strong>{" "}
+                      {(course.prerequisites || []).map((prerequisiteId) =>
+                        courses.find((item) => item.id === prerequisiteId)?.title || "Unavailable course")
+                        .join(", ")}
+                      {unmet.length
+                        ? " · Complete before enrolling"
+                        : enrollment ? " · Complete" : " · Ready"}
+                    </div>
+                  )}
                   <div className="courses-card-footer">
-                    <span>{course.lessons?.length || 0} lessons{enrollment
+                    <span>{course.lessons?.length || 0} lessons · {formatCourseDuration(
+                      estimateCourseDurationMinutes(course),
+                    )}{enrollment
                       ? `   ${complete === 100 ? "Completed" : `${complete}% complete`}`
                       : ""}</span>
                     {enrollment ? (
-                      <button className="btn btn-blue" type="button" onClick={() => {
-                        setActiveCourseId(course.id);
-                        setActiveLessonId(course.lessons?.[0]?.id || "");
-                      }}>Continue learning</button>
+                      <div>
+                        <button className="btn btn-blue" type="button" onClick={() => openCourse(course)}>
+                          Continue learning
+                        </button>
+                        <button className="btn btn-outline" type="button"
+                          onClick={() => offlineSaved ? removeCourseOffline(course) : saveCourseForOffline(course)}>
+                          {offlineSaved ? "Remove offline copy" : "Save offline"}
+                        </button>
+                        {complete === 100 && (
+                          <button className="btn btn-outline" type="button"
+                            onClick={() => downloadCourseCertificate(course, enrollment)}>
+                            Certificate
+                          </button>
+                        )}
+                      </div>
                     ) : (
-                      <button className="btn btn-blue" type="button" onClick={() => enroll(course)}>Register for course</button>
+                      <button className="btn btn-blue" type="button" onClick={() => enroll(course)}
+                        disabled={isOffline || !studentId || unmet.length > 0}
+                        title={unmet.length ? "Complete prerequisite courses before enrolling." : ""}>
+                        {unmet.length ? "Prerequisites required" : "Register for course"}
+                      </button>
                     )}
                   </div>
                   {enrollment && (

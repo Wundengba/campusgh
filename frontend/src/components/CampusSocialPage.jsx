@@ -77,6 +77,28 @@ const formatDate = (value) => {
   }).format(date);
 };
 
+const formatRelativeTime = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Just now";
+
+  const elapsedSeconds = Math.round((date.getTime() - Date.now()) / 1000);
+  const elapsedMinutes = Math.round(elapsedSeconds / 60);
+  const elapsedHours = Math.round(elapsedMinutes / 60);
+  const elapsedDays = Math.round(elapsedHours / 24);
+  const elapsedWeeks = Math.round(elapsedDays / 7);
+  const elapsedMonths = Math.round(elapsedDays / 30);
+  const elapsedYears = Math.round(elapsedDays / 365);
+  const formatter = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
+
+  if (Math.abs(elapsedSeconds) < 60) return formatter.format(elapsedSeconds, "second");
+  if (Math.abs(elapsedMinutes) < 60) return formatter.format(elapsedMinutes, "minute");
+  if (Math.abs(elapsedHours) < 24) return formatter.format(elapsedHours, "hour");
+  if (Math.abs(elapsedDays) < 7) return formatter.format(elapsedDays, "day");
+  if (Math.abs(elapsedWeeks) < 5) return formatter.format(elapsedWeeks, "week");
+  if (Math.abs(elapsedMonths) < 12) return formatter.format(elapsedMonths, "month");
+  return formatter.format(elapsedYears, "year");
+};
+
 const getErrorMessage = (error) =>
   error?.message || "Something went wrong. Please try again.";
 
@@ -485,8 +507,8 @@ export default function CampusSocialPage({
         }
         if (profile) {
           authorMap.set(profile.user_id, {
-            ...profile,
             ...authorMap.get(profile.user_id),
+            ...profile,
             is_verified:
               String(studentData?.status || "").toLowerCase() === "confirmed" ||
               authorMap.get(profile.user_id)?.is_verified === true,
@@ -556,7 +578,7 @@ export default function CampusSocialPage({
     return () => {
       active = false;
     };
-  }, [account?.id, discoveryLoading, follows]);
+  }, [account?.id, discoveryLoading, follows, profile]);
 
   useEffect(() => {
     if (!supabase || !account?.id) return undefined;
@@ -1405,6 +1427,9 @@ export default function CampusSocialPage({
   };
 
   const renderPost = (post, fullMode = false) => {
+    const postTimestamp = activeView === "feed"
+      ? post.shared_at || post.created_at
+      : post.created_at;
     const ownReaction = reactions.find((item) => item.post_id === post.id && item.user_id === account?.id);
     const hasReposted = reposts.some((item) => item.post_id === post.id && item.user_id === account?.id);
     const postComments = comments.filter((item) => item.post_id === post.id);
@@ -1444,18 +1469,27 @@ export default function CampusSocialPage({
         <div className="campus-social-comment-thread" key={comment.id} style={{ "--comment-depth": Math.min(depth, 5) }}>
           <div className="campus-social-comment">
             <Avatar name={commentDisplayName} src={author?.avatar_url} size="small" />
-            <strong className="campus-social-name-with-badge">
-              {author?.user_id && comment.author_id !== account?.id ? (
-                <button
-                  type="button"
-                  className="campus-social-profile-link"
-                  onClick={() => openMemberProfile(author)}
-                >
-                  {commentDisplayName}
-                </button>
-              ) : commentDisplayName}
-              {author?.is_verified && <StudentVerifiedBadge />}
-            </strong>
+            <div className="campus-social-comment-meta">
+              <strong className="campus-social-name-with-badge">
+                {author?.user_id && comment.author_id !== account?.id ? (
+                  <button
+                    type="button"
+                    className="campus-social-profile-link"
+                    onClick={() => openMemberProfile(author)}
+                  >
+                    {commentDisplayName}
+                  </button>
+                ) : commentDisplayName}
+                {author?.is_verified && <StudentVerifiedBadge />}
+              </strong>
+              <time
+                className="campus-social-comment-time"
+                dateTime={comment.created_at}
+                title={formatDate(comment.created_at)}
+              >
+                {formatRelativeTime(comment.created_at)}
+              </time>
+            </div>
             <span>{comment.body}</span>
             <div className="campus-social-comment-actions">
               <button
@@ -1570,9 +1604,9 @@ export default function CampusSocialPage({
                 <NameTags tags={post.author.name_tags} />
               </span>
             )}
-            {activeView === "feed" ? (
-              <time dateTime={post.shared_at || post.created_at}>{formatDate(post.shared_at || post.created_at)}</time>
-            ) : <span>{formatDate(post.created_at)}</span>}
+            <time dateTime={postTimestamp} title={formatDate(postTimestamp)}>
+              {formatRelativeTime(postTimestamp)}
+            </time>
           </div>
           <div className="campus-social-post-controls">
             {!fullMode && (

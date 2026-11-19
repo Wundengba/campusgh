@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient.js";
 import {
+  isPassingScore,
+  PASSMARK_PERCENTAGE,
+} from "../config/assessmentSettings.js";
+import {
   getLearningLevelFromClass,
   getLearningLevelName,
   getLearningResourceLabel,
@@ -258,8 +262,7 @@ export default function StudentStudyContentPage({ studentData }) {
       }
     });
 
-    const passingScore = Math.ceil(totalScore * 0.7);
-    const passed = earnedScore >= passingScore;
+    const passed = isPassingScore(earnedScore, totalScore);
 
     setQuizScore(earnedScore);
     setQuizSubmitted(true);
@@ -683,6 +686,9 @@ export default function StudentStudyContentPage({ studentData }) {
                   <h3>Quiz Completed!</h3>
                   <div style={{ fontSize: '1.2em', margin: '16px 0' }}>
                     Your Score: {quizScore} / {questions.reduce((sum, q) => sum + q.points, 0)} points
+                  </div>
+                  <div style={{ color: '#64748b', marginBottom: '12px' }}>
+                    Pass mark: {PASSMARK_PERCENTAGE}%
                   </div>
                   <div style={{ color: '#64748b', marginBottom: '24px' }}>
                     {quizPassed

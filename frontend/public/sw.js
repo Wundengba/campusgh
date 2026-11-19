@@ -1,4 +1,5 @@
 const CACHE_NAME = "campus-ghana-shell-v3";
+const COURSE_IMAGE_CACHE_NAME = "campus-ghana-course-images-v1";
 const APP_SHELL = ["/", "/manifest.webmanifest", "/icons/campus-icon.svg", "/icons/campus-icon-maskable.svg"];
 
 self.addEventListener("install", (event) => {
@@ -10,7 +11,7 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then((keys) => Promise.all(keys
-      .filter((key) => key !== CACHE_NAME)
+      .filter((key) => key !== CACHE_NAME && key !== COURSE_IMAGE_CACHE_NAME)
       .map((key) => caches.delete(key))
     )).then(() => self.clients.claim())
   );

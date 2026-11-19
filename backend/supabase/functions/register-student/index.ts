@@ -32,6 +32,7 @@ const allowedRegions = new Set([
 ]);
 
 const allowedLevels = new Set(["JHS", "SHS", "University"]);
+const legalDocumentVersion = "2026-11-16";
 
 const cleanText = (value: unknown) =>
   typeof value === "string" ? value.trim() : "";
@@ -127,6 +128,16 @@ Deno.serve(async (request) => {
   const password = typeof payload.password === "string" ? payload.password : "";
   const rawPhone = cleanText(payload.phone).replace(/[\s()-]/g, "");
 
+  if (
+    payload.termsAccepted !== true ||
+    payload.privacyNoticeAccepted !== true ||
+    payload.legalDocumentVersion !== legalDocumentVersion
+  ) {
+    return respond({
+      error: "Accept the current Terms of Use and Privacy Notice before creating an account.",
+    }, 400);
+  }
+
   if (fullName.length < 2 || fullName.length > 120) {
     return respond({ error: "Enter a full name between 2 and 120 characters." }, 400);
   }
@@ -200,6 +211,7 @@ Deno.serve(async (request) => {
   const serviceClient = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+  const legalAcceptedAt = new Date().toISOString();
 
   const { data: existingContact, error: contactLookupError } = await serviceClient
     .from("students")
@@ -248,6 +260,10 @@ Deno.serve(async (request) => {
         display_name: displayName,
         portal_role: "student",
         campus_student_password_changed: true,
+        terms_of_use_accepted_at: legalAcceptedAt,
+        terms_of_use_version: legalDocumentVersion,
+        privacy_notice_accepted_at: legalAcceptedAt,
+        privacy_notice_version: legalDocumentVersion,
       },
     });
     if (!error && data.user) {

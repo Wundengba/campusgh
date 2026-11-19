@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   IoAttachOutline,
-  IoChatbubblesOutline,
   IoMicOutline,
-  IoPeopleOutline,
   IoSend,
   IoStopCircleOutline,
   IoCloseOutline,
@@ -112,8 +110,10 @@ function MemberAvatar({ src, name, className = "" }) {
 export default function StudyTeamsPage({
   user,
   studentData,
+  view = "teams",
   messageTarget,
   onMessageTargetHandled,
+  onOpenChat,
 }) {
   const actorRole = String(user?.role || "").toLowerCase();
   const isStudent = actorRole === "student";
@@ -131,7 +131,7 @@ export default function StudyTeamsPage({
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [selectedTeamId, setSelectedTeamId] = useState("");
-  const [activeTab, setActiveTab] = useState("teams");
+  const [activeTab, setActiveTab] = useState(view === "chats" ? "chats" : "teams");
   const [directConversations, setDirectConversations] = useState([]);
   const [teamPreviews, setTeamPreviews] = useState({});
   const [selectedConversationId, setSelectedConversationId] = useState("");
@@ -182,6 +182,11 @@ export default function StudyTeamsPage({
   }, [isStudent, studentClass]);
 
   const loadMemberships = useCallback(async () => {
+    if (view === "chats") {
+      setMemberships([]);
+      setLoading(false);
+      return;
+    }
     if (!supabase || !user?.authUserId) {
       setMemberships([]);
       setErrorMessage(
@@ -210,7 +215,7 @@ export default function StudyTeamsPage({
       setMemberships((data || []).filter((item) => item.team));
     }
     setLoading(false);
-  }, [user?.authUserId]);
+  }, [user?.authUserId, view]);
 
   useEffect(() => {
     loadMemberships();
@@ -247,7 +252,7 @@ export default function StudyTeamsPage({
   useEffect(() => {
     let active = true;
     const loadTeamPreviews = async () => {
-      if (!supabase || activeMemberships.length === 0) {
+      if (view === "chats" || !supabase || activeMemberships.length === 0) {
         setTeamPreviews({});
         return;
       }
@@ -298,7 +303,7 @@ export default function StudyTeamsPage({
     return () => {
       active = false;
     };
-  }, [activeMemberships]);
+  }, [activeMemberships, view]);
   const pendingInvitations = useMemo(
     () => memberships.filter((item) => item.invitation_status === "pending"),
     [memberships],
@@ -335,7 +340,7 @@ export default function StudyTeamsPage({
   useEffect(() => {
     let active = true;
     const loadMembers = async () => {
-      if (!supabase || activeMemberships.length === 0) {
+      if (view === "chats" || !supabase || activeMemberships.length === 0) {
         setAvailableMembers([]);
         return;
       }
@@ -374,7 +379,7 @@ export default function StudyTeamsPage({
     return () => {
       active = false;
     };
-  }, [activeMemberships, user?.authUserId]);
+  }, [activeMemberships, user?.authUserId, view]);
 
   const currentDisplayName = displayNameOrFallback(
     memberNames.get(user?.authUserId) ||
@@ -562,6 +567,10 @@ export default function StudyTeamsPage({
         { p_other_user_id: member.user_id },
       );
       if (error) throw error;
+      if (onOpenChat) {
+        onOpenChat(member);
+        return;
+      }
       await loadDirectConversations();
       setSelectedConversationId(conversationId);
       setActiveTab("chats");
@@ -997,9 +1006,12 @@ export default function StudyTeamsPage({
     <div className="study-teams-page">
       <div className="study-teams-toolbar">
         <header className="study-teams-heading">
-          <h1>Chats</h1>
+          <h1>{activeTab === "chats" ? "Chats" : "Study Teams"}</h1>
+          {view === "teams" && activeTab === "teams" && (
+            <p>Create a group to study and share resources together.</p>
+          )}
         </header>
-        {canCreateTeams && (
+        {view === "teams" && activeTab === "teams" && canCreateTeams && (
           <details className="study-chat-create">
             <summary aria-label="Create a study team" title="Create a study team">
               <IoAddOutline aria-hidden="true" />
@@ -1067,7 +1079,7 @@ export default function StudyTeamsPage({
         </div>
       )}
 
-      {pendingInvitations.length > 0 && (
+      {view === "teams" && activeTab === "teams" && pendingInvitations.length > 0 && (
         <details className="study-chat-create study-chat-invitations">
           <summary>
             Invitations ({pendingInvitations.length})
@@ -1123,40 +1135,12 @@ export default function StudyTeamsPage({
         </details>
       )}
 
-      <nav className="study-chat-tabs" role="tablist" aria-label="Study conversations">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "teams"}
-          className={activeTab === "teams" ? "is-active" : ""}
-          onClick={() => setActiveTab("teams")}
-        >
-          <IoPeopleOutline aria-hidden="true" />
-          Teams
-          {pendingInvitations.length > 0 && (
-            <span aria-label={`${pendingInvitations.length} invitations`}>
-              {pendingInvitations.length}
-            </span>
-          )}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "chats"}
-          className={activeTab === "chats" ? "is-active" : ""}
-          onClick={() => setActiveTab("chats")}
-        >
-          <IoChatbubblesOutline aria-hidden="true" />
-          Chats
-        </button>
-      </nav>
-
       <section
         className={`study-chat-workspace${(activeTab === "teams" && selectedTeam) || (activeTab === "chats" && selectedConversation) ? " is-chat-open" : ""}`}
         aria-label="Study conversations"
       >
         <aside className="study-chat-sidebar">
-          {loading ? (
+          {loading && activeTab === "teams" ? (
             <p className="study-chat-muted" role="status">Loading your teams...</p>
           ) : activeTab === "teams" && activeMemberships.length === 0 ? (
             <p className="study-chat-muted">Create a team or accept an invitation to get started.</p>
@@ -1212,7 +1196,7 @@ export default function StudyTeamsPage({
                   </time>
                 </button>
               ))}
-              {availableMembers.length > 0 && (
+              {view === "teams" && availableMembers.length > 0 && (
                 <>
                   <h3 className="study-chat-list-label">Team members</h3>
                   {availableMembers.map((member) => (
@@ -1232,9 +1216,9 @@ export default function StudyTeamsPage({
                   ))}
                 </>
               )}
-              {directConversations.length === 0 && availableMembers.length === 0 && (
+              {directConversations.length === 0 && (view === "chats" || availableMembers.length === 0) && (
                 <p className="study-chat-muted">
-                  Accept a team invitation to chat privately with its members.
+                  Find someone in Campus Social and choose Message to start a private chat.
                 </p>
               )}
             </div>
@@ -1592,12 +1576,12 @@ export default function StudyTeamsPage({
               <strong>
                 {activeTab === "teams"
                   ? "Select a team to open its group chat"
-                  : "Select a chat or choose a team member"}
+                  : "Choose a conversation or start one from Campus Social"}
               </strong>
               <p>
                 {activeTab === "teams"
                   ? "Your team messages, shared files, and participants will appear here."
-                  : "Private chats are available with members of your teams."}
+                  : "Choose a profile in Campus Social and select Message to start a private chat."}
               </p>
             </div>
           )}

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { GHANA_DISTRICTS } from "../data/ghanaDistricts.js";
 import { resizeStudentPhotoDataUrl } from "../utils/studentPhoto.js";
 import { Ico } from "./Ico.jsx";
+import { LegalDocuments, LEGAL_DOCUMENT_VERSION } from "./LegalDocuments.jsx";
 import "./StudentSignup.css";
 
 const STUDENT_LEVELS = ["JHS", "SHS", "University"];
@@ -34,6 +35,7 @@ export function StudentSignup({ onCreateAccount, onBackToLogin }) {
   const [createdStudentId, setCreatedStudentId] = useState("");
   const [studentIdSmsSent, setStudentIdSmsSent] = useState(false);
   const [coreDetailsConfirmed, setCoreDetailsConfirmed] = useState(false);
+  const [legalDocumentsAccepted, setLegalDocumentsAccepted] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const errorDialogRef = useRef(null);
@@ -89,6 +91,10 @@ export function StudentSignup({ onCreateAccount, onBackToLogin }) {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    if (!legalDocumentsAccepted) {
+      setError("Accept the Terms of Use and Privacy Notice to create your account.");
+      return;
+    }
     if (form.password.length < 10) {
       setError("Choose a password with at least 10 characters.");
       return;
@@ -112,6 +118,9 @@ export function StudentSignup({ onCreateAccount, onBackToLogin }) {
       const photoDataUrl = await resizeStudentPhotoDataUrl(photo);
       const result = await onCreateAccount({
         ...form,
+        termsAccepted: true,
+        privacyNoticeAccepted: true,
+        legalDocumentVersion: LEGAL_DOCUMENT_VERSION,
         email: form.email.trim().toLowerCase(),
         fullName: form.fullName.trim(),
         displayName: form.displayName.trim(),
@@ -284,7 +293,23 @@ export function StudentSignup({ onCreateAccount, onBackToLogin }) {
         <span>I have checked my full name, gender, and date of birth and understand these core details can only be corrected by an administrator after signup.</span>
       </label>
 
-      <button className="btn-primary signup-submit" type="submit" disabled={loading || !coreDetailsConfirmed}>
+      <div className="signup-legal-consent">
+        <label className="signup-core-confirmation">
+          <input
+            type="checkbox"
+            checked={legalDocumentsAccepted}
+            onChange={(event) => setLegalDocumentsAccepted(event.target.checked)}
+            required
+          />
+          <span>I have read and accept the Terms of Use and Privacy Notice.</span>
+        </label>
+        <div className="signup-legal-links">
+          <span>Review:</span>
+          <LegalDocuments placement="signup" />
+        </div>
+      </div>
+
+      <button className="btn-primary signup-submit" type="submit" disabled={loading || !coreDetailsConfirmed || !legalDocumentsAccepted}>
         {loading ? "Creating your account..." : "Create Account"}
       </button>
       <button className="signup-back" type="button" onClick={() => onBackToLogin("")} disabled={loading}>

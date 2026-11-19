@@ -22,6 +22,12 @@
   font-size: clamp(1.25rem, 3vw, 1.55rem);
 }
 
+.study-teams-heading p {
+  margin: 4px 0 0;
+  color: #667074;
+  font-size: 0.88rem;
+}
+
 .study-chat-create {
   position: relative;
   flex: 0 0 auto;
@@ -126,63 +132,17 @@
   gap: 10px;
 }
 
-.study-chat-tabs {
-  display: flex;
-  gap: 20px;
-  width: 100%;
-  max-width: 100%;
-  padding: 0 8px;
-  border-bottom: 1px solid #e3e7e8;
-  background: #fff;
-}
-
-.study-chat-tabs button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  min-height: 42px;
-  padding: 0 4px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  border-radius: 0;
-  background: transparent;
-  color: #536166;
-  font: inherit;
-  font-size: 0.8rem;
-  cursor: pointer;
-}
-
-.study-chat-tabs button svg {
-  font-size: 1rem;
-}
-
-.study-chat-tabs button.is-active {
-  border-bottom: 2px solid #128c7e;
-  color: #128c7e;
-}
-
-.study-chat-tabs button > span {
-  display: inline-grid;
-  min-width: 18px;
-  height: 18px;
-  place-items: center;
-  border-radius: 50%;
-  background: #e7f5f2;
-  font-size: 0.65rem;
-}
-
 .study-chat-workspace {
   display: grid;
-  grid-template-columns: minmax(220px, 30%) minmax(0, 1fr);
-  height: min(70svh, 740px);
-  min-height: 380px;
-  max-height: 740px;
+  grid-template-columns: minmax(250px, 31%) minmax(0, 1fr);
+  height: clamp(460px, 72svh, 760px);
+  min-height: 0;
   overflow: hidden;
-  border: 1px solid #dfe3e5;
-  border-radius: 8px;
+  border: 1px solid #dfe5e7;
+  border-radius: 14px;
   background: #fff;
   color: #222e35;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.07);
 }
 
 .study-chat-sidebar,
@@ -368,11 +328,10 @@
 }
 
 .study-chat-main {
-  position: relative;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
   overflow: hidden;
-  background: #f3f5f5;
+  background: #f7f9fa;
 }
 
 .study-chat-header {
@@ -419,7 +378,6 @@
 
 .study-chat-messages {
   display: flex;
-  flex: 1;
   flex-direction: column;
   gap: 8px;
   min-height: 0;
@@ -501,8 +459,8 @@
 }
 
 .study-chat-typing {
-  min-height: 18px;
-  padding: 0 18px 4px;
+  min-height: 22px;
+  padding: 2px 18px 4px;
   color: #536166;
   font-size: 0.7rem;
 }
@@ -533,12 +491,9 @@
 }
 
 .study-chat-composer-wrap {
-  position: relative;
   display: block;
-  flex: 0 0 auto;
-  margin-top: auto;
   padding-bottom: env(safe-area-inset-bottom, 0px);
-  border-top: 1px solid #e2e5e6;
+  border-top: 1px solid #e7ecee;
   background: #fff;
 }
 
@@ -549,9 +504,9 @@
 .study-chat-composer {
   display: flex;
   align-items: flex-end;
-  gap: 8px;
+  gap: 10px;
   margin: 0;
-  padding: 9px 12px;
+  padding: 12px 16px;
   background: #fff;
 }
 
@@ -625,18 +580,24 @@
 .study-chat-composer textarea {
   flex: 1;
   min-width: 0;
-  min-height: 40px;
-  max-height: 110px;
+  min-height: 44px;
+  max-height: 120px;
   resize: none;
-  padding: 10px 13px;
-  border: 0;
-  border-radius: 20px;
+  padding: 11px 15px;
+  border: 1px solid #e0e7e9;
+  border-radius: 22px;
   outline: 0;
-  background: #fff;
+  background: #f6f8f9;
   color: #222e35;
   font: inherit;
   font-size: 0.84rem;
   line-height: 1.4;
+}
+
+.study-chat-composer textarea:focus {
+  border-color: #80c4b8;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(18, 140, 126, 0.1);
 }
 
 .study-chat-composer textarea::placeholder {
@@ -929,17 +890,17 @@
 }
 
 .study-chat-no-selection {
-  flex: 1;
+  grid-row: 1 / -1;
 }
 
 @media (max-width: 680px) {
   .study-chat-workspace {
     display: flex;
     flex-direction: column;
-    height: min(68svh, 620px);
-    min-height: 360px;
+    height: min(72svh, 680px);
+    min-height: 420px;
     max-height: none;
-    border-radius: 7px;
+    border-radius: 12px;
   }
 
   .study-chat-sidebar {
@@ -963,7 +924,9 @@
   }
 
   .study-chat-main {
+    display: grid;
     flex: 1;
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
     min-height: 0;
   }
 
@@ -1021,13 +984,9 @@
     width: min(560px, calc(100vw - 24px));
   }
 
-  .study-chat-tabs button {
-    flex: 1;
-  }
-
   .study-chat-composer {
-    gap: 5px;
-    padding: 7px 8px;
+    gap: 6px;
+    padding: 9px 10px;
   }
 
   .study-chat-icon-button,

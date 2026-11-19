@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import "./LegalDocuments.css";
 
+export const LEGAL_DOCUMENT_VERSION = "2026-11-16";
+
 const LEGAL_DOCUMENTS = {
   terms: {
     label: "Terms of Use",

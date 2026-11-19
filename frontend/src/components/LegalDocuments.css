@@ -179,6 +179,14 @@
 
 .legal-documents-topbar { display: flex; align-items: center; }
 .legal-documents-topbar .legal-document-dialog { z-index: 2000; }
+.legal-documents-signup .legal-document-links {
+  justify-content: flex-start;
+  gap: 8px 14px;
+}
+.legal-documents-signup .legal-document-links button {
+  font-size: .78rem;
+  text-decoration: underline;
+}
 
 body.dark-mode .legal-document-dialog {
   border-color: #34473c;

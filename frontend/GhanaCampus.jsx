@@ -15613,6 +15613,16 @@ const getPriorityBottomKeys = (priorityKeys, navItems, blockedKeys = new Set(), 
   return selected.slice(0, limit);
 };
 
+const SHORT_BOTTOM_NAV_LABELS = {
+  "Pending Selections": "Pending",
+  "Managed School": "School",
+  "Academic Progress": "Progress",
+  "My Children": "Children",
+};
+
+const getBottomNavLabel = (item) =>
+  SHORT_BOTTOM_NAV_LABELS[item.label] || item.label;
+
 const SCHOOL_ADMIN_EXCLUDED_KEYS = new Set([
   "super-admin-control",
   "helpdesk",
@@ -16264,13 +16274,14 @@ function StudentStudyGroupsPage({ user, studentData }) {
 const STUDENT_NAV = [
   { section: "Overview" },
   { key: "dashboard", icon: "dashboard", label: "Dashboard", color: "#6366f1" },
+  { section: "Account" },
   { key: "profile", icon: "profile", label: "Profile", color: "#3b82f6" },
   { section: "Academics" },
   { key: "courses", icon: "docs", label: "Courses", color: "#0891b2" },
   { key: "social", icon: "profile", label: "Social", color: "#0f766e" },
   { key: "study-teams", icon: "chat", label: "Study Teams", color: "#7c3aed" },
   { key: "chats", icon: "chat", label: "Chats", color: "#0f766e" },
-  { section: "Communication & Resources" },
+  { section: "Communication & Support" },
   { key: "announcements", icon: "bell", label: "Notifications", color: "#16834a" },
   { key: "support-tickets", icon: "support", label: "Support", color: "#0f766e" },
 ];
@@ -17415,10 +17426,14 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
         onLogout={onLogout}
         onMenuClick={() => setSidebarOpen((o) => !o)}
         menuOpen={sidebarOpen}
+        menuId="admin-navigation"
+        pageTitle={filteredAdminNav.find((item) => item.key === tab)?.label || "Dashboard"}
         darkMode={darkMode}
         onToggleDark={onToggleDark}
         onOpenNotifications={openNotifications}
         onOpenProfile={() => goTab("settings")}
+        profileLabel="Settings"
+        onOpenDashboard={() => goTab("dashboard")}
         onReloadApp={reloadApp}
         notificationCount={notificationCount + unreadAdminSupportNotifications}
         chatUnread={totalChatUnread}
@@ -17432,7 +17447,12 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
             onClick={() => setSidebarOpen(false)}
           />
         )}
-        <nav className={`sidebar ${sidebarOpen ? "" : "closed"}`}>
+        <nav
+          id="admin-navigation"
+          className={`sidebar ${sidebarOpen ? "" : "closed"}`}
+          aria-label="Administrator navigation"
+          aria-hidden={!sidebarOpen}
+        >
           <button
             className="sidebar-brand brand-btn"
             onClick={reloadApp}
@@ -17554,6 +17574,8 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
               <div key={item.key}>
                 <button
                   className={`nav-item ${activeParent ? "active" : ""}`}
+                  aria-current={tab === item.key ? "page" : undefined}
+                  aria-expanded={hasChildren ? Boolean(expandedGroups[item.key]) : undefined}
                   onClick={() => {
                     goTab(item.key, !hasChildren);
                     if (hasChildren) {
@@ -17607,6 +17629,7 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
                       <button
                         key={child.key}
                         className={`nav-item ${tab === child.key ? "active" : ""}`}
+                        aria-current={tab === child.key ? "page" : undefined}
                         onClick={() => goTab(child.key)}
                         style={{
                           paddingLeft: 36,
@@ -17669,9 +17692,12 @@ function AdminPortal({ user, onLogout, darkMode, onToggleDark }) {
                   key={k}
                   className={`bottom-nav-item ${tab === k ? "active" : ""}`}
                   onClick={() => goTab(k)}
+                  aria-label={item.label}
+                  title={item.label}
+                  aria-current={tab === k ? "page" : undefined}
                 >
                   <Ico name={item.icon} size={30} color={item.color} />
-                  <span>{item.label}</span>
+                  <span>{getBottomNavLabel(item)}</span>
                 </button>
               );
             })}
@@ -18560,10 +18586,14 @@ function SchoolAdminPortal({ user, onLogout, darkMode, onToggleDark }) {
         onLogout={onLogout}
         onMenuClick={() => setSidebarOpen((o) => !o)}
         menuOpen={sidebarOpen}
+        menuId="school-admin-navigation"
+        pageTitle={filteredSchoolAdminNav.find((item) => item.key === tab)?.label || "Dashboard"}
         darkMode={darkMode}
         onToggleDark={onToggleDark}
         onOpenNotifications={() => setNotificationCount(0)}
         onOpenProfile={() => goTab("school-profile")}
+        profileLabel="Managed School"
+        onOpenDashboard={() => goTab("dashboard")}
         onReloadApp={reloadApp}
         notificationCount={notificationCount}
         chatUnread={totalChatUnread}
@@ -18577,7 +18607,12 @@ function SchoolAdminPortal({ user, onLogout, darkMode, onToggleDark }) {
             onClick={() => setSidebarOpen(false)}
           />
         )}
-        <nav className={`sidebar ${sidebarOpen ? "" : "closed"}`}>
+        <nav
+          id="school-admin-navigation"
+          className={`sidebar ${sidebarOpen ? "" : "closed"}`}
+          aria-label="School administrator navigation"
+          aria-hidden={!sidebarOpen}
+        >
           <button
             className="sidebar-brand brand-btn"
             onClick={reloadApp}
@@ -18615,6 +18650,8 @@ function SchoolAdminPortal({ user, onLogout, darkMode, onToggleDark }) {
               <div key={item.key}>
                 <button
                   className={`nav-item ${activeParent ? "active" : ""}`}
+                  aria-current={tab === item.key ? "page" : undefined}
+                  aria-expanded={hasChildren ? Boolean(expandedGroups[item.key]) : undefined}
                   onClick={() => {
                     goTab(item.key, !hasChildren);
                     if (hasChildren) {
@@ -18670,6 +18707,7 @@ function SchoolAdminPortal({ user, onLogout, darkMode, onToggleDark }) {
                       <button
                         key={child.key}
                         className={`nav-item ${tab === child.key ? "active" : ""}`}
+                        aria-current={tab === child.key ? "page" : undefined}
                         onClick={() => goTab(child.key)}
                         style={{
                           paddingLeft: 36,
@@ -18747,9 +18785,12 @@ function SchoolAdminPortal({ user, onLogout, darkMode, onToggleDark }) {
                   key={key}
                   className={`bottom-nav-item ${tab === key ? "active" : ""}`}
                   onClick={() => goTab(key)}
+                  aria-label={item.label}
+                  title={item.label}
+                  aria-current={tab === key ? "page" : undefined}
                 >
                   <Ico name={item.icon} size={30} color={item.color} />
-                  <span>{item.label}</span>
+                  <span>{getBottomNavLabel(item)}</span>
                 </button>
               );
             })}
@@ -20321,10 +20362,13 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
         onLogout={onLogout}
         onMenuClick={() => setSidebarOpen((o) => !o)}
         menuOpen={sidebarOpen}
+        menuId="student-navigation"
+        pageTitle={filteredStudentNav.find((item) => item.key === tab)?.label || "Student Portal"}
         darkMode={darkMode}
         onToggleDark={onToggleDark}
         onOpenNotifications={openNotifications}
         onOpenProfile={() => goTab("profile")}
+        onOpenDashboard={() => goTab("dashboard")}
         onReloadApp={reloadApp}
         notificationCount={notificationCount + unreadPortalNotificationCount}
         chatUnread={totalChatUnread}
@@ -20341,7 +20385,12 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
             onClick={() => setSidebarOpen(false)}
           />
         )}
-        <nav className={`sidebar ${sidebarOpen ? "" : "closed"}`}>
+        <nav
+          id="student-navigation"
+          className={`sidebar ${sidebarOpen ? "" : "closed"}`}
+          aria-label="Student navigation"
+          aria-hidden={!sidebarOpen}
+        >
           <button
             className="sidebar-brand brand-btn"
             onClick={reloadApp}
@@ -20375,6 +20424,8 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
               <div key={item.key}>
                 <button
                   className={`nav-item ${activeParent ? "active" : ""}`}
+                  aria-current={tab === item.key ? "page" : undefined}
+                  aria-expanded={hasChildren ? Boolean(expandedGroups[item.key]) : undefined}
                   onClick={() => {
                     goTab(item.key, !hasChildren);
                     if (hasChildren) {
@@ -20423,6 +20474,7 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
                       <button
                         key={child.key}
                         className={`nav-item ${tab === child.key ? "active" : ""}`}
+                        aria-current={tab === child.key ? "page" : undefined}
                         onClick={() => goTab(child.key)}
                         style={{
                           paddingLeft: 36,
@@ -20494,9 +20546,12 @@ function StudentPortal({ user, onLogout, darkMode, onToggleDark }) {
                   key={k}
                   className={`bottom-nav-item ${tab === k ? "active" : ""}`}
                   onClick={() => goTab(k)}
+                  aria-label={item.label}
+                  title={item.label}
+                  aria-current={tab === k ? "page" : undefined}
                 >
                   <Ico name={item.icon} size={30} color={item.color} />
-                  <span style={{ fontSize: ".56rem" }}>{item.label}</span>
+                  <span>{getBottomNavLabel(item)}</span>
                 </button>
               );
             })}
@@ -21333,12 +21388,25 @@ function ParentPortal({ user, onLogout, darkMode, onToggleDark }) {
         onToggleDark={onToggleDark}
         onMenuClick={() => setSidebarOpen((open) => !open)}
         menuOpen={sidebarOpen}
+        menuId="parent-navigation"
+        pageTitle={PARENT_NAV.find((item) => item.key === tab)?.label || "Parent Portal"}
+        systemName="Parent Portal"
+        onOpenNotifications={() => goTab("notifications")}
+        onOpenChat={() => goTab("messages")}
+        onOpenDashboard={() => goTab("dashboard")}
+        showProfile={false}
+        modalMenu
       />
 
       <div className="portal-main">
         <div className={`portal-sidebar ${sidebarOpen ? "open" : ""}`}>
           <div className="sidebar-content">
-            <nav className="portal-nav">
+            <nav
+              id="parent-navigation"
+              className="portal-nav"
+              aria-label="Parent navigation"
+              aria-hidden={!sidebarOpen}
+            >
               {PARENT_NAV.map((item, index) => {
                 if (item.section) {
                   return (
@@ -21352,6 +21420,7 @@ function ParentPortal({ user, onLogout, darkMode, onToggleDark }) {
                     key={item.key}
                     className={`nav-item ${tab === item.key ? "active" : ""}`}
                     onClick={() => goTab(item.key)}
+                    aria-current={tab === item.key ? "page" : undefined}
                     style={{ "--nav-color": item.color }}
                   >
                     <Ico name={item.icon} size={20} color={tab === item.key ? item.color : "#64748b"} />
@@ -21378,8 +21447,11 @@ function ParentPortal({ user, onLogout, darkMode, onToggleDark }) {
               className={`bottom-nav-item ${tab === key ? "active" : ""}`}
               onClick={() => goTab(key)}
               title={item.label}
+              aria-label={item.label}
+              aria-current={tab === key ? "page" : undefined}
             >
               <Ico name={item.icon} size={20} color={tab === key ? item.color : "#64748b"} />
+              <span>{getBottomNavLabel(item)}</span>
             </button>
           );
         })}

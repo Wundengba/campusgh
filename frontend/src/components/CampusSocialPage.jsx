@@ -133,6 +133,17 @@ function mergeSocialAuthors(...groups) {
   return [...authorsById.values()];
 }
 
+const getSafeStudentProjectUrl = (value) => {
+  try {
+    const url = new URL(String(value || ""));
+    return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password
+      ? url.toString()
+      : "";
+  } catch {
+    return "";
+  }
+};
+
 export default function CampusSocialPage({
   user,
   studentData,
@@ -180,6 +191,9 @@ export default function CampusSocialPage({
   const [openComments, setOpenComments] = useState({});
   const [reportTarget, setReportTarget] = useState(null);
   const [viewedMemberProfile, setViewedMemberProfile] = useState(null);
+  const [memberProfilePortfolio, setMemberProfilePortfolio] = useState(null);
+  const [memberProfilePortfolioLoading, setMemberProfilePortfolioLoading] = useState(false);
+  const [memberProfilePortfolioError, setMemberProfilePortfolioError] = useState("");
   const [memberProfileTab, setMemberProfileTab] = useState("activity");
   const [memberProfilePosts, setMemberProfilePosts] = useState([]);
   const [memberProfilePostCount, setMemberProfilePostCount] = useState(null);
@@ -333,7 +347,7 @@ export default function CampusSocialPage({
       if (active) setAccount(authUser);
       const { data: existingProfile, error: profileError } = await supabase
         .from("campus_social_profiles")
-        .select("user_id, display_name, username, name_tags, display_name_changed_at, username_changed_at, bio, institution, education_level, avatar_url, discoverable")
+        .select("user_id, display_name, username, name_tags, display_name_changed_at, username_changed_at, bio, avatar_url, discoverable")
         .eq("user_id", authUser.id)
         .maybeSingle();
 
@@ -358,7 +372,7 @@ export default function CampusSocialPage({
             education_level: String(studentData?.class || studentData?.class_name || "").slice(0, 80),
             avatar_url: studentData?.photo_url || null,
           })
-          .select("user_id, display_name, username, name_tags, display_name_changed_at, username_changed_at, bio, institution, education_level, avatar_url, discoverable")
+          .select("user_id, display_name, username, name_tags, display_name_changed_at, username_changed_at, bio, avatar_url, discoverable")
           .single();
 
         if (createError) {
@@ -374,7 +388,7 @@ export default function CampusSocialPage({
           .from("campus_social_profiles")
           .update({ avatar_url: studentData.photo_url })
           .eq("user_id", authUser.id)
-          .select("user_id, display_name, username, name_tags, display_name_changed_at, username_changed_at, bio, institution, education_level, avatar_url, discoverable")
+          .select("user_id, display_name, username, name_tags, display_name_changed_at, username_changed_at, bio, avatar_url, discoverable")
           .single();
         if (!updateError && updatedProfile) nextProfile = updatedProfile;
         else nextProfile = { ...existingProfile, avatar_url: studentData.photo_url };
@@ -597,7 +611,7 @@ export default function CampusSocialPage({
             .select("community_id, user_id, role, status")
             .eq("user_id", account.id),
           supabase.from("campus_social_profiles")
-            .select("user_id, display_name, username, name_tags, bio, institution, education_level, avatar_url")
+            .select("user_id, display_name, username, name_tags, bio, avatar_url")
             .eq("discoverable", true).order("display_name").limit(80),
           supabase.from("registered_schools")
             .select("id, name, region, category")
@@ -658,6 +672,34 @@ export default function CampusSocialPage({
     () => new Set(follows.map((follow) => follow.followed_user_id).filter(Boolean)),
     [follows],
   );
+
+  useEffect(() => {
+    const memberId = viewedMemberProfile?.user_id;
+    if (activeView !== "member-profile" || !account?.id || !memberId) return undefined;
+    let active = true;
+    setMemberProfilePortfolio(null);
+    setMemberProfilePortfolioError("");
+    setMemberProfilePortfolioLoading(true);
+    const loadPortfolio = async () => {
+      try {
+        const { data, error } = await supabase.rpc("get_student_profile_portfolio", {
+          p_user_id: memberId,
+        });
+        if (error) throw error;
+        if (active) setMemberProfilePortfolio(data?.[0] || null);
+      } catch (error) {
+        if (active) {
+          setMemberProfilePortfolioError(
+            `This student's shared portfolio could not be loaded: ${getErrorMessage(error)}`,
+          );
+        }
+      } finally {
+        if (active) setMemberProfilePortfolioLoading(false);
+      }
+    };
+    loadPortfolio();
+    return () => { active = false; };
+  }, [account?.id, activeView, viewedMemberProfile?.user_id]);
 
   useEffect(() => {
     const memberId = viewedMemberProfile?.user_id;
@@ -854,8 +896,6 @@ export default function CampusSocialPage({
     activeView,
     viewedMemberProfile?.avatar_url,
     viewedMemberProfile?.display_name,
-    viewedMemberProfile?.education_level,
-    viewedMemberProfile?.institution,
     viewedMemberProfile?.is_verified,
     viewedMemberProfile?.name_tags,
     viewedMemberProfile?.user_id,
@@ -910,7 +950,7 @@ export default function CampusSocialPage({
   const visiblePeople = useMemo(() => {
     const query = search.trim().toLowerCase();
     return people.filter((person) => person.user_id !== account?.id && (
-    !query || [person.display_name, person.username, ...(person.name_tags || []), person.institution, person.education_level, person.bio]
+    !query || [person.display_name, person.username, ...(person.name_tags || []), person.bio]
         .some((value) => String(value || "").toLowerCase().includes(query))
     ));
   }, [people, search, account?.id]);
@@ -1986,8 +2026,77 @@ export default function CampusSocialPage({
                   </h2>
                   {viewedMemberProfile.username && <p className="campus-social-member-profile-handle">@{viewedMemberProfile.username}</p>}
                   {viewedMemberProfile.bio && <p>{viewedMemberProfile.bio}</p>}
-                  <p>{viewedMemberProfile.institution || viewedMemberProfile.education_level || "Campus Ghana member"}</p>
+                  {[memberProfilePortfolio?.institution, memberProfilePortfolio?.education_level]
+                    .filter(Boolean).join(" · ") && (
+                      <p>{[memberProfilePortfolio?.institution, memberProfilePortfolio?.education_level]
+                        .filter(Boolean).join(" · ")}</p>
+                    )}
                 </div>
+                {memberProfilePortfolioLoading && (
+                  <p className="campus-social-member-profile-portfolio-message" role="status">
+                    Loading shared portfolio...
+                  </p>
+                )}
+                {memberProfilePortfolioError && (
+                  <p className="campus-social-member-profile-portfolio-message is-error" role="status">
+                    {memberProfilePortfolioError}
+                  </p>
+                )}
+                {memberProfilePortfolio && (
+                  <section className="campus-social-member-portfolio" aria-label="Shared student portfolio">
+                    <span className="campus-social-member-portfolio-eyebrow">STUDENT PORTFOLIO</span>
+                    {memberProfilePortfolio.goal_title && (
+                      <div className="campus-social-member-portfolio-goal">
+                        <strong>{memberProfilePortfolio.goal_title}</strong>
+                        {memberProfilePortfolio.goal_target != null && (
+                          <span>
+                            Target {memberProfilePortfolio.goal_type === "cgpa"
+                              ? `course CGPA ${Number(memberProfilePortfolio.goal_target).toFixed(2)}`
+                              : `${memberProfilePortfolio.goal_target} ${memberProfilePortfolio.goal_type}`}
+                            {memberProfilePortfolio.goal_due_date
+                              ? ` · by ${new Date(`${memberProfilePortfolio.goal_due_date}T00:00:00`).toLocaleDateString()}`
+                              : ""}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {memberProfilePortfolio.skills?.length > 0 && (
+                      <div className="campus-social-member-portfolio-skills">
+                        {memberProfilePortfolio.skills.map((skill, index) => (
+                          <span key={`${skill}-${index}`}>{skill}</span>
+                        ))}
+                      </div>
+                    )}
+                    {memberProfilePortfolio.projects?.length > 0 && (
+                      <div className="campus-social-member-portfolio-projects">
+                        {memberProfilePortfolio.projects.map((project, index) => {
+                          const safeUrl = getSafeStudentProjectUrl(project.url);
+                          return (
+                            <article key={`${project.title}-${index}`}>
+                              <strong>{project.title}</strong>
+                              {project.description && <p>{project.description}</p>}
+                              {safeUrl && <a href={safeUrl} target="_blank" rel="noopener noreferrer">View project</a>}
+                            </article>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {memberProfilePortfolio.achievements?.length > 0 && (
+                      <div className="campus-social-member-portfolio-achievements">
+                        <strong>Course progress &amp; certificates</strong>
+                        {memberProfilePortfolio.achievements.map((achievement, index) => (
+                          <div key={`${achievement.course_title}-${index}`}>
+                            <span>{achievement.course_title}</span>
+                            <small>
+                              {achievement.completed_chapters} of {achievement.total_chapters} chapters passed
+                              {achievement.certificate_issued_at ? " · Certificate earned" : ""}
+                            </small>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                )}
                 {(memberProfileStats.error || memberProfilePostsError) && (
                   <p className="campus-social-member-profile-error" role="status">
                     {[memberProfileStats.error, memberProfilePostsError].filter(Boolean).join(" ")}
@@ -2148,7 +2257,7 @@ export default function CampusSocialPage({
               </div>
               <label className="campus-social-search">
                 <Ico name="search" size={17} />
-                <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search names, schools, interests" />
+                <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search names and interests" />
               </label>
               <section className="campus-social-discover-section">
                 <h3>Students <span>{visiblePeople.length}</span></h3>
@@ -2171,7 +2280,7 @@ export default function CampusSocialPage({
                         <NameTags tags={person.name_tags || []} />
                       </strong>
                       {person.username && <span>@{person.username}</span>}
-                      <span>{person.institution || person.education_level || "Student"}</span>
+                      <span>Campus Ghana member</span>
                       {person.bio && <p>{person.bio}</p>}
                       {followButton("student", person.user_id)}
                     </article>

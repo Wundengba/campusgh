@@ -1,0 +1,321 @@
+.verification-card-copy {
+  margin: 0;
+  color: #64708a;
+  font-size: .88rem;
+  line-height: 1.65;
+}
+
+.verification-application-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.verification-application-summary > div {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid #e8ebf3;
+  border-radius: 12px;
+  background: #f8f9fc;
+}
+
+.verification-application-summary span,
+.verification-admin-kicker,
+.verification-admin-fee-form label,
+.verification-admin-review label,
+.verification-admin-refund label {
+  color: #748099;
+  font-size: .68rem;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.verification-application-summary strong {
+  color: #263149;
+  font-size: .86rem;
+}
+
+.verification-review-note,
+.verification-admin-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #59657b;
+  font-size: .82rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.verification-payment-actions { margin-top: 16px; }
+.verification-feedback {
+  margin: 12px 0 0;
+  color: #64708a;
+  font-size: .82rem;
+  line-height: 1.55;
+}
+
+.verification-feedback.is-error,
+.verification-admin-message.is-error { color: #b42318; }
+
+.verification-admin-panel {
+  margin: 0 0 24px;
+  padding: 22px;
+  border: 1px solid #e1e7f0;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 12px 30px rgba(37, 49, 74, .06);
+}
+
+.verification-admin-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 18px;
+}
+
+.verification-admin-heading h2 {
+  margin: 7px 0 5px;
+  color: #1d2b45;
+  font-size: 1.15rem;
+}
+
+.verification-admin-heading p,
+.verification-admin-refund p {
+  margin: 0;
+  color: #68758c;
+  font-size: .82rem;
+  line-height: 1.55;
+}
+
+.verification-admin-fee-form {
+  display: grid;
+  width: min(100%, 340px);
+  flex: 0 0 300px;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid #e1e7f0;
+  border-radius: 14px;
+  background: #f8faff;
+}
+
+.verification-admin-fee-form > div {
+  display: flex;
+  gap: 8px;
+}
+
+.verification-admin-fee-form input,
+.verification-admin-review textarea,
+.verification-admin-refund textarea {
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid #d6deea;
+  border-radius: 9px;
+  color: #263149;
+  background: #fff;
+  font: inherit;
+}
+
+.verification-admin-fee-form input { width: 100%; }
+.verification-admin-fee-form button,
+.verification-admin-review button,
+.verification-admin-refund button {
+  padding: 9px 12px;
+  border: 1px solid #d6deea;
+  border-radius: 9px;
+  color: #34425e;
+  background: #fff;
+  font: inherit;
+  font-size: .78rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.verification-admin-fee-form button { color: #fff; background: #4e5bd9; border-color: #4e5bd9; }
+.verification-admin-fee-form button:disabled,
+.verification-admin-review button:disabled,
+.verification-admin-refund button:disabled { opacity: .6; cursor: not-allowed; }
+.verification-admin-fee-form small { color: #7b879d; font-size: .7rem; line-height: 1.45; }
+.verification-admin-message { margin: 12px 0; color: #26734d; font-size: .82rem; }
+.verification-admin-empty { margin: 0; padding: 16px; color: #738098; font-size: .84rem; }
+.verification-admin-toolbar {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.verification-admin-filters {
+  display: flex;
+  flex: 1 1 520px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.verification-admin-filters label {
+  display: grid;
+  min-width: min(100%, 190px);
+  flex: 1 1 190px;
+  gap: 5px;
+  color: #748099;
+  font-size: .68rem;
+  font-weight: 750;
+}
+.verification-admin-filters select,
+.verification-admin-filters input {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid #d6deea;
+  border-radius: 9px;
+  color: #34425e;
+  background: #fff;
+  font: inherit;
+  font-size: .76rem;
+}
+.verification-admin-result-count {
+  padding-bottom: 10px;
+  color: #738098;
+  font-size: .72rem;
+  white-space: nowrap;
+}
+.verification-admin-toolbar button {
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 1px solid #d6deea;
+  border-radius: 9px;
+  color: #526179;
+  background: #fff;
+  font: inherit;
+  font-size: .74rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+.verification-admin-toolbar button:disabled { opacity: .6; cursor: not-allowed; }
+.verification-admin-list { display: grid; gap: 12px; }
+
+.verification-admin-application {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #e5e9f1;
+  border-radius: 14px;
+  background: #fcfdff;
+}
+
+.verification-admin-application-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.verification-admin-application-heading h3 {
+  margin: 0;
+  color: #263149;
+  font-size: .94rem;
+}
+
+.verification-admin-application-heading p {
+  margin: 4px 0 0;
+  color: #77839a;
+  font-size: .76rem;
+}
+
+.verification-admin-status {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border-radius: 999px;
+  color: #526179;
+  background: #eef1f6;
+  font-size: .67rem;
+  font-weight: 800;
+}
+
+.verification-admin-status.is-pending_review { color: #875916; background: #fff2d6; }
+.verification-admin-status.is-approved { color: #167447; background: #e4f6ec; }
+.verification-admin-status.is-declined,
+.verification-admin-status.is-payment_failed { color: #a3312c; background: #ffebe8; }
+.verification-admin-details { display: flex; flex-wrap: wrap; gap: 8px 18px; color: #69758b; font-size: .74rem; }
+.verification-admin-details span:last-child { overflow-wrap: anywhere; }
+.verification-admin-review,
+.verification-admin-refund { display: grid; gap: 8px; }
+.verification-admin-review textarea,
+.verification-admin-refund textarea { width: 100%; resize: vertical; font-size: .8rem; }
+.verification-admin-review > div,
+.verification-admin-refund > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.verification-admin-review button.is-approve { color: #fff; background: #167447; border-color: #167447; }
+.verification-admin-review button.is-decline { color: #a3312c; border-color: #f0c4bd; }
+.verification-admin-refund > p strong { color: #34425e; }
+
+body.dark-mode .verification-admin-panel {
+  border-color: #303438;
+  color: #eceef0;
+  background: #1b1e20;
+  box-shadow: none;
+}
+
+body.dark-mode .verification-admin-heading h2,
+body.dark-mode .verification-admin-application-heading h3,
+body.dark-mode .verification-application-summary strong,
+body.dark-mode .verification-admin-refund > p strong {
+  color: #eef0f2;
+}
+
+body.dark-mode .verification-admin-heading p,
+body.dark-mode .verification-admin-application-heading p,
+body.dark-mode .verification-admin-details,
+body.dark-mode .verification-admin-empty,
+body.dark-mode .verification-card-copy,
+body.dark-mode .verification-feedback,
+body.dark-mode .verification-review-note,
+body.dark-mode .verification-admin-note,
+body.dark-mode .verification-admin-refund p {
+  color: #afb7c2;
+}
+
+body.dark-mode .verification-application-summary > div,
+body.dark-mode .verification-admin-fee-form,
+body.dark-mode .verification-admin-application {
+  border-color: #343a40;
+  background: #222629;
+}
+
+body.dark-mode .verification-admin-fee-form input,
+body.dark-mode .verification-admin-review textarea,
+body.dark-mode .verification-admin-refund textarea,
+body.dark-mode .verification-admin-review button,
+body.dark-mode .verification-admin-toolbar button,
+body.dark-mode .verification-admin-filters select,
+body.dark-mode .verification-admin-filters input,
+body.dark-mode .verification-admin-refund button {
+  border-color: #454d55;
+  color: #edf0f2;
+  background: #1b1e20;
+}
+
+body.dark-mode .verification-admin-fee-form button,
+body.dark-mode .verification-admin-review button.is-approve {
+  border-color: #6574e8;
+  color: #fff;
+  background: #4e5bd9;
+}
+
+body.dark-mode .verification-admin-status.is-pending_review { color: #f4d28a; background: #45391e; }
+body.dark-mode .verification-admin-status.is-approved { color: #8fe0b0; background: #1c3c2c; }
+body.dark-mode .verification-admin-status.is-declined,
+body.dark-mode .verification-admin-status.is-payment_failed { color: #f2a59e; background: #472725; }
+
+@media (max-width: 760px) {
+  .verification-admin-panel { padding: 16px; border-radius: 16px; }
+  .verification-admin-heading { flex-direction: column; }
+  .verification-admin-fee-form { width: 100%; flex-basis: auto; }
+  .verification-admin-application-heading { flex-direction: column; }
+  .verification-admin-filters { flex-basis: 100%; }
+  .verification-admin-filters label { flex-basis: 100%; }
+  .verification-admin-result-count { padding-bottom: 0; }
+  .verification-admin-toolbar > button { flex: 1 1 100%; }
+}

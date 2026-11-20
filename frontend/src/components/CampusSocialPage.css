@@ -4528,3 +4528,136 @@ body.dark-mode .campus-social-notifications-back:hover {
   object-fit: cover;
   object-position: center;
 }
+
+.campus-social-page .campus-social-member-profile-card {
+  grid-template-areas: "summary" "identity" "profile-error" "actions" "portfolio";
+}
+
+.campus-social-member-portfolio,
+.campus-social-member-profile-portfolio-message {
+  grid-area: portfolio;
+  min-width: 0;
+  margin: 0;
+}
+
+.campus-social-member-portfolio {
+  display: grid;
+  gap: 11px;
+  padding: 14px;
+  border: 1px solid #e3e7f0;
+  border-radius: 13px;
+  background: linear-gradient(145deg, #fff, #f8f9fc);
+}
+
+.campus-social-member-portfolio-eyebrow {
+  color: #78839a;
+  font-size: .62rem;
+  font-weight: 800;
+  letter-spacing: .12em;
+}
+
+.campus-social-member-portfolio-goal {
+  display: grid;
+  gap: 3px;
+}
+
+.campus-social-member-portfolio-goal strong,
+.campus-social-member-portfolio-achievements > strong {
+  color: #202b40;
+  font-size: .83rem;
+}
+
+.campus-social-member-portfolio-goal span,
+.campus-social-member-portfolio-achievements small {
+  color: #718099;
+  font-size: .7rem;
+}
+
+.campus-social-member-portfolio-skills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.campus-social-member-portfolio-skills span {
+  padding: 5px 9px;
+  border-radius: 999px;
+  color: #315a4b;
+  background: #e8f4ee;
+  font-size: .69rem;
+  font-weight: 700;
+}
+
+.campus-social-member-portfolio-projects,
+.campus-social-member-portfolio-achievements {
+  display: grid;
+  gap: 7px;
+}
+
+.campus-social-member-portfolio-projects article,
+.campus-social-member-portfolio-achievements > div {
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px;
+  border: 1px solid #e8ebf2;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.campus-social-member-portfolio-projects strong,
+.campus-social-member-portfolio-achievements span {
+  color: #27344a;
+  font-size: .75rem;
+}
+
+.campus-social-member-portfolio-projects p {
+  margin: 0 !important;
+  color: #718099 !important;
+  font-size: .7rem !important;
+}
+
+.campus-social-member-portfolio-projects a {
+  width: fit-content;
+  color: #286c57;
+  font-size: .7rem;
+  font-weight: 750;
+}
+
+.campus-social-member-profile-portfolio-message {
+  padding: 9px 11px;
+  border-radius: 9px;
+  color: #718099;
+  background: #f3f5f8;
+  font-size: .72rem;
+}
+
+.campus-social-member-profile-portfolio-message.is-error {
+  color: #913a3a;
+  background: #fff0ef;
+}
+
+body.dark-mode .campus-social-member-portfolio {
+  border-color: #35323e;
+  background: linear-gradient(145deg, #211f28, #19171f);
+}
+
+body.dark-mode .campus-social-member-portfolio-goal strong,
+body.dark-mode .campus-social-member-portfolio-achievements > strong,
+body.dark-mode .campus-social-member-portfolio-projects strong,
+body.dark-mode .campus-social-member-portfolio-achievements span {
+  color: #eeeaf6;
+}
+
+body.dark-mode .campus-social-member-portfolio-projects article,
+body.dark-mode .campus-social-member-portfolio-achievements > div {
+  border-color: #393543;
+  background: #19171f;
+}
+
+body.dark-mode .campus-social-member-profile-portfolio-message { color: #b6afc3; background: #19171f; }
+
+@media (max-width: 520px) {
+  .campus-social-page .campus-social-member-profile-card {
+    grid-template-areas: "summary" "identity" "profile-error" "actions" "portfolio";
+  }
+}

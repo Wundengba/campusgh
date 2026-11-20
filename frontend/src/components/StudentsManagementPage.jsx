@@ -6,6 +6,8 @@ import { SettingsContext } from "../context/SettingsContext.js";
 import { useIsMobileLayout } from "../hooks/useIsMobileLayout.js";
 import { sortStudentsByIndex } from "../utils/campusData.js";
 import { GHANA_REGIONS } from "../data/demoData.js";
+import "./VerificationApplications.css";
+import { filterVerificationApplications } from "../utils/verificationPayments.js";
 
 const normalizeParentContactValue = (value) => {
   const raw = String(value ?? "").trim();
@@ -336,6 +338,7 @@ export function StudentsPage({
   registeredSchools = [],
   canAssignRegisteredSchool = false,
   isSuperAdmin = false,
+  canManageVerificationFee = false,
 }) {
   const { cfg } = useContext(SettingsContext);
   const classOptions = resolveClassOptions(cfg);
@@ -371,7 +374,170 @@ export function StudentsPage({
   const [showArchivedStudents, setShowArchivedStudents] = useState(false);
   const [archivedStudents, setArchivedStudents] = useState([]);
   const [loadingArchivedStudents, setLoadingArchivedStudents] = useState(false);
+  const [verificationApplications, setVerificationApplications] = useState([]);
+  const [verificationApplicationStatusFilter, setVerificationApplicationStatusFilter] = useState("all");
+  const [verificationApplicationSearch, setVerificationApplicationSearch] = useState("");
+  const [verificationFeePesewas, setVerificationFeePesewas] = useState(0);
+  const [verificationFeeInput, setVerificationFeeInput] = useState("0.00");
+  const [verificationLoading, setVerificationLoading] = useState(true);
+  const [verificationSavingFee, setVerificationSavingFee] = useState(false);
+  const [verificationReviewingId, setVerificationReviewingId] = useState("");
+  const [verificationRefundingId, setVerificationRefundingId] = useState("");
+  const [verificationReviewNotes, setVerificationReviewNotes] = useState({});
+  const [verificationRefundNotes, setVerificationRefundNotes] = useState({});
+  const [verificationError, setVerificationError] = useState("");
+  const [verificationMessage, setVerificationMessage] = useState("");
   const { notify } = useContext(NotificationContext) || {};
+  const filteredVerificationApplications = useMemo(
+    () => filterVerificationApplications(verificationApplications, {
+      status: verificationApplicationStatusFilter,
+      search: verificationApplicationSearch,
+    }),
+    [verificationApplications, verificationApplicationStatusFilter, verificationApplicationSearch],
+  );
+
+  const loadVerificationApplications = async () => {
+    if (!supabase) {
+      setVerificationError("Verification applications require a Supabase connection.");
+      setVerificationLoading(false);
+      return;
+    }
+
+    setVerificationLoading(true);
+    setVerificationError("");
+    try {
+      const [settingsResult, applicationsResult] = await Promise.all([
+        supabase.from("student_verification_payment_settings")
+          .select("fee_pesewas")
+          .eq("id", 1)
+          .maybeSingle(),
+        supabase.rpc("list_student_verification_applications"),
+      ]);
+      if (settingsResult.error || applicationsResult.error) {
+        throw settingsResult.error || applicationsResult.error;
+      }
+
+      const fee = Number(settingsResult.data?.fee_pesewas || 0);
+      setVerificationFeePesewas(fee);
+      setVerificationFeeInput((fee / 100).toFixed(2));
+      setVerificationApplications(applicationsResult.data || []);
+    } catch (error) {
+      setVerificationError(
+        `Verification data could not be loaded: ${error?.message || "Please try again."}`,
+      );
+    } finally {
+      setVerificationLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadVerificationApplications();
+  }, []);
+
+  const saveVerificationFee = async (event) => {
+    event.preventDefault();
+    const amount = Number(verificationFeeInput);
+    const feePesewas = Math.round(amount * 100);
+    if (
+      !verificationFeeInput.trim() ||
+      !Number.isFinite(amount) ||
+      amount < 0 ||
+      amount > 100000 ||
+      Math.abs(amount * 100 - feePesewas) > 0.0001
+    ) {
+      setVerificationError("Enter a fee between GHS 0.00 and GHS 100,000.00, using at most two decimals.");
+      return;
+    }
+    if (!supabase) {
+      setVerificationError("Verification settings require a Supabase connection.");
+      return;
+    }
+
+    setVerificationSavingFee(true);
+    setVerificationError("");
+    setVerificationMessage("");
+    try {
+      const { data, error } = await supabase.rpc("set_student_verification_fee", {
+        p_fee_pesewas: feePesewas,
+      });
+      if (error) throw error;
+      const savedFee = Number(data ?? feePesewas);
+      setVerificationFeePesewas(savedFee);
+      setVerificationFeeInput((savedFee / 100).toFixed(2));
+      setVerificationMessage(
+        savedFee > 0
+          ? `Verification fee set to GHS ${(savedFee / 100).toFixed(2)}.`
+          : "Verification applications are now paused.",
+      );
+      notify?.("Verification fee updated.", "success");
+    } catch (error) {
+      setVerificationError(`The verification fee was not saved: ${error?.message || "Please try again."}`);
+    } finally {
+      setVerificationSavingFee(false);
+    }
+  };
+
+  const reviewVerificationApplication = async (application, decision) => {
+    const decisionLabel = decision === "approve" ? "approve and verify" : "decline";
+    if (!window.confirm(`Are you sure you want to ${decisionLabel} ${application.student_name || "this student"}?`)) {
+      return;
+    }
+    setVerificationReviewingId(application.application_id);
+    setVerificationError("");
+    setVerificationMessage("");
+    try {
+      const { error } = await supabase.rpc("review_student_verification_application", {
+        p_application_id: application.application_id,
+        p_decision: decision,
+        p_review_note: verificationReviewNotes[application.application_id]?.trim() || null,
+      });
+      if (error) throw error;
+      setVerificationMessage(
+        decision === "approve"
+          ? `${application.student_name || "Student"} was verified.`
+          : `${application.student_name || "Student"}'s application was declined; review any refund manually.`,
+      );
+      setVerificationReviewNotes((current) => ({
+        ...current,
+        [application.application_id]: "",
+      }));
+      await Promise.all([
+        loadVerificationApplications(),
+        typeof onReloadStudents === "function" ? onReloadStudents() : Promise.resolve(),
+      ]);
+    } catch (error) {
+      setVerificationError(`The application could not be reviewed: ${error?.message || "Please try again."}`);
+    } finally {
+      setVerificationReviewingId("");
+    }
+  };
+
+  const updateVerificationRefund = async (application, refundStatus) => {
+    if (!window.confirm(
+      refundStatus === "refunded"
+        ? "Confirm that the refund has already been processed in Paystack?"
+        : "Confirm that no refund will be issued for this application?",
+    )) {
+      return;
+    }
+    setVerificationRefundingId(application.application_id);
+    setVerificationError("");
+    setVerificationMessage("");
+    try {
+      const { error } = await supabase.rpc("update_student_verification_refund", {
+        p_application_id: application.application_id,
+        p_refund_status: refundStatus,
+        p_refund_note: verificationRefundNotes[application.application_id]?.trim() || null,
+      });
+      if (error) throw error;
+      setVerificationMessage("Refund handling updated.");
+      await loadVerificationApplications();
+    } catch (error) {
+      setVerificationError(`Refund handling could not be saved: ${error?.message || "Please try again."}`);
+    } finally {
+      setVerificationRefundingId("");
+    }
+  };
 
   const loadArchivedStudents = async () => {
     if (!supabase) {
@@ -940,6 +1106,206 @@ export function StudentsPage({
             </div>
           </div>
         </div>
+
+        <section className="verification-admin-panel" aria-labelledby="verification-admin-title">
+          <div className="verification-admin-heading">
+            <div>
+              <span className="verification-admin-kicker">IDENTITY &amp; TRUST</span>
+              <h2 id="verification-admin-title">Student verification applications</h2>
+              <p>Only completed Paystack payments are submitted here. Approve or decline each paid application below.</p>
+            </div>
+            {canManageVerificationFee && (
+              <form className="verification-admin-fee-form" onSubmit={saveVerificationFee}>
+                <label htmlFor="verification-fee">Application fee (GHS)</label>
+                <div>
+                  <input
+                    id="verification-fee"
+                    type="number"
+                    min="0"
+                    max="100000"
+                    step="0.01"
+                    value={verificationFeeInput}
+                    onChange={(event) => setVerificationFeeInput(event.target.value)}
+                    disabled={verificationLoading || verificationSavingFee || Boolean(verificationError)}
+                  />
+                  <button type="submit" disabled={verificationLoading || verificationSavingFee || Boolean(verificationError)}>
+                    {verificationSavingFee ? "Saving..." : "Save fee"}
+                  </button>
+                </div>
+                <small>
+                  Current fee: GHS {(verificationFeePesewas / 100).toFixed(2)}. Set GHS 0.00 to pause new applications; payments already started keep their original fee.
+                </small>
+                <small>Paystack secret and webhook must be configured before opening paid applications.</small>
+              </form>
+            )}
+          </div>
+          {verificationError && (
+            <p className="verification-admin-message is-error" role="alert">{verificationError}</p>
+          )}
+          {verificationMessage && (
+            <p className="verification-admin-message" role="status">{verificationMessage}</p>
+          )}
+          <div className="verification-admin-toolbar">
+            <div className="verification-admin-filters">
+              <label>
+                <span>Filter status</span>
+                <select
+                  value={verificationApplicationStatusFilter}
+                  onChange={(event) => setVerificationApplicationStatusFilter(event.target.value)}
+                >
+                  <option value="all">All applications</option>
+                  <option value="pending_review">Awaiting review</option>
+                  <option value="approved">Approved</option>
+                  <option value="declined">Declined</option>
+                </select>
+              </label>
+              <label>
+                <span>Search applications</span>
+                <input
+                  type="search"
+                  value={verificationApplicationSearch}
+                  onChange={(event) => setVerificationApplicationSearch(event.target.value)}
+                  placeholder="Name, student ID, school, or reference"
+                />
+              </label>
+            </div>
+            <span className="verification-admin-result-count" role="status">
+              Showing {filteredVerificationApplications.length} of {verificationApplications.length}
+            </span>
+            <button type="button" onClick={() => void loadVerificationApplications()} disabled={verificationLoading}>
+              {verificationLoading ? "Refreshing..." : "Refresh applications"}
+            </button>
+          </div>
+          {verificationLoading ? (
+            <p className="verification-admin-empty" role="status">Loading applications...</p>
+          ) : !verificationApplications.length ? (
+            <p className="verification-admin-empty">No verification applications have been submitted.</p>
+          ) : !filteredVerificationApplications.length ? (
+            <p className="verification-admin-empty">No applications match these filters.</p>
+          ) : (
+            <div className="verification-admin-list">
+              {filteredVerificationApplications.map((application) => {
+                const isPendingReview = application.status === "pending_review";
+                const isDeclined = application.status === "declined";
+              const statusLabel = isPendingReview
+                ? "Paid · awaiting review"
+                : application.status === "approved"
+                  ? "Verified"
+                  : "Declined";
+                return (
+                  <article className="verification-admin-application" key={application.application_id}>
+                    <div className="verification-admin-application-heading">
+                      <div>
+                        <h3>{application.student_name || "Student"}</h3>
+                        <p>
+                          {application.student_index || "No student ID"}
+                          {application.school_name ? ` · ${application.school_name}` : ""}
+                        </p>
+                      </div>
+                      <span className={`verification-admin-status is-${application.status}`}>
+                        {statusLabel}
+                      </span>
+                    </div>
+                    <div className="verification-admin-details">
+                      <span>
+                        Fee: {new Intl.NumberFormat("en-GH", {
+                          style: "currency",
+                          currency: application.currency || "GHS",
+                        }).format(Number(application.amount_pesewas || 0) / 100)}
+                      </span>
+                      <span>
+                        {application.paid_at
+                          ? `Paid ${new Date(application.paid_at).toLocaleString("en-GH")}`
+                          : `Applied ${new Date(application.created_at).toLocaleDateString("en-GH")}`}
+                      </span>
+                      {application.reviewed_at && (
+                        <span>Reviewed {new Date(application.reviewed_at).toLocaleString("en-GH")}</span>
+                      )}
+                      <span>Reference: {application.payment_reference}</span>
+                    </div>
+                    {application.review_note && (
+                      <p className="verification-admin-note">Review note: {application.review_note}</p>
+                    )}
+                    {isPendingReview && (
+                      <div className="verification-admin-review">
+                        <label htmlFor={`verification-note-${application.application_id}`}>Decision note visible to applicant (optional)</label>
+                        <textarea
+                          id={`verification-note-${application.application_id}`}
+                          maxLength={500}
+                          rows={2}
+                          value={verificationReviewNotes[application.application_id] || ""}
+                          onChange={(event) => setVerificationReviewNotes((current) => ({
+                            ...current,
+                            [application.application_id]: event.target.value,
+                          }))}
+                        />
+                        <div>
+                          <button
+                            type="button"
+                            className="is-approve"
+                            disabled={verificationReviewingId === application.application_id}
+                            onClick={() => reviewVerificationApplication(application, "approve")}
+                          >
+                            {verificationReviewingId === application.application_id ? "Saving..." : "Approve & verify"}
+                          </button>
+                          <button
+                            type="button"
+                            className="is-decline"
+                            disabled={verificationReviewingId === application.application_id}
+                            onClick={() => reviewVerificationApplication(application, "decline")}
+                          >
+                            Decline
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {isDeclined && (
+                      <div className="verification-admin-refund">
+                        <p>
+                          Refund handling: <strong>
+                            {application.refund_status === "refunded"
+                              ? "Refund recorded"
+                              : application.refund_status === "not_refunded"
+                                ? "No refund recorded"
+                                : "Manual review required"}
+                          </strong>
+                        </p>
+                        {application.refund_note && <p className="verification-admin-note">{application.refund_note}</p>}
+                        <label htmlFor={`verification-refund-note-${application.application_id}`}>Refund note visible to student</label>
+                        <textarea
+                          id={`verification-refund-note-${application.application_id}`}
+                          maxLength={500}
+                          rows={2}
+                          value={verificationRefundNotes[application.application_id] || ""}
+                          onChange={(event) => setVerificationRefundNotes((current) => ({
+                            ...current,
+                            [application.application_id]: event.target.value,
+                          }))}
+                        />
+                        <div>
+                          <button
+                            type="button"
+                            disabled={verificationRefundingId === application.application_id}
+                            onClick={() => updateVerificationRefund(application, "refunded")}
+                          >
+                            Record refund issued
+                          </button>
+                          <button
+                            type="button"
+                            disabled={verificationRefundingId === application.application_id}
+                            onClick={() => updateVerificationRefund(application, "not_refunded")}
+                          >
+                            Record no refund
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
 
         {!students.length && (
           <div className="alert alert-warning">{emptyRemoteMessage}</div>

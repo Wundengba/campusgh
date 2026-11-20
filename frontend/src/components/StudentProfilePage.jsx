@@ -8,8 +8,18 @@ import {
 import { supabase } from "../lib/supabaseClient.js";
 import { SettingsContext } from "../context/SettingsContext.js";
 import { GHANA_DISTRICTS } from "../data/ghanaDistricts.js";
+import {
+  buildStudentCoursePortfolio,
+  calculateProfileGoalProgress,
+  DEFAULT_STUDENT_PROFILE_PORTFOLIO,
+  getStudentProfileCompletenessItems,
+  normalizeStudentProfileProjects,
+  normalizeStudentProfileSkills,
+} from "../utils/studentProfilePortfolio.js";
+import { buildVerificationCallbackMessage } from "../utils/verificationPayments.js";
 import { resizeStudentPhoto } from "../utils/studentPhoto.js";
 import { StudentVerifiedBadge } from "./StudentVerifiedBadge.jsx";
+import "./VerificationApplications.css";
 import "./StudentProfilePage.css";
 
 const getStudentEducationLevel = (student) => {
@@ -34,6 +44,18 @@ const getSocialCooldownDate = (changedAt, days) => {
 const getSocialNameTags = (value) => [...new Set(
   String(value || "").split(",").map((tag) => tag.trim().replace(/^#/, "")).filter(Boolean),
 )];
+
+const getVerificationLoadMessage = (error) => {
+  const message = String(error?.message || "");
+  if (
+    error?.code === "PGRST205" ||
+    (/student_verification_(payment_settings|applications)/i.test(message) &&
+      /schema cache|could not find the table/i.test(message))
+  ) {
+    return "Verification applications are not available yet. Please check back soon.";
+  }
+  return "Verification details are temporarily unavailable. Please try again later.";
+};
 
 function ProfileDetail({ label, value }) {
   if (value == null || String(value).trim() === "") return null;
@@ -97,6 +119,36 @@ export function StudentProfile({
   const [loadingSocialProfile, setLoadingSocialProfile] = useState(true);
   const [savingSocialProfile, setSavingSocialProfile] = useState(false);
   const [socialProfileMessage, setSocialProfileMessage] = useState("");
+  const [profilePortfolioDraft, setProfilePortfolioDraft] = useState({
+    ...DEFAULT_STUDENT_PROFILE_PORTFOLIO,
+    goal_target: "",
+    skills_input: "",
+  });
+  const [profilePortfolioLoading, setProfilePortfolioLoading] = useState(true);
+  const [profilePortfolioSaving, setProfilePortfolioSaving] = useState(false);
+  const [profilePortfolioError, setProfilePortfolioError] = useState("");
+  const [profilePortfolioMessage, setProfilePortfolioMessage] = useState("");
+  const [profileProjectDraft, setProfileProjectDraft] = useState({
+    title: "",
+    description: "",
+    url: "",
+  });
+  const [coursePortfolio, setCoursePortfolio] = useState({
+    courses: [],
+    certificates: [],
+    completedCourses: 0,
+    completedChapters: 0,
+    totalChapters: 0,
+    cgpa: null,
+  });
+  const [coursePortfolioLoading, setCoursePortfolioLoading] = useState(true);
+  const [coursePortfolioError, setCoursePortfolioError] = useState("");
+  const [verificationSettings, setVerificationSettings] = useState(null);
+  const [verificationApplication, setVerificationApplication] = useState(null);
+  const [verificationLoading, setVerificationLoading] = useState(true);
+  const [verificationBusy, setVerificationBusy] = useState(false);
+  const [verificationError, setVerificationError] = useState("");
+  const [verificationMessage, setVerificationMessage] = useState("");
   const isLoadingProfile = !studentData;
   const student = studentData || {
     full_name: "Loading profile...",
@@ -133,23 +185,22 @@ export function StudentProfile({
     ["Gender", student.gender],
     ["Date of birth", student.date_of_birth],
   ];
-  const profileCompletionFields = [
-    student.full_name || user?.name,
-    student.index || student.index_number,
-    student.class,
-    ...(schoolLinkedStudent ? [student.institution] : []),
-    student.region,
-    student.district,
-    student.gender,
-    student.date_of_birth,
-    student.contact_email,
-    student.personal_contact,
-  ];
-  const profileCompletion = Math.round(
-    (profileCompletionFields.filter((value) => String(value || "").trim()).length /
-      profileCompletionFields.length) *
-      100,
+  const profileCompletionItems = getStudentProfileCompletenessItems(
+    student,
+    schoolLinkedStudent,
+    user?.name,
   );
+  const incompleteProfileItems = profileCompletionItems.filter((item) => !item.complete);
+  const profileCompletion = Math.round(
+    (profileCompletionItems.filter((item) => item.complete).length / profileCompletionItems.length) * 100,
+  );
+  const profileGoalProgress = calculateProfileGoalProgress(profilePortfolioDraft, coursePortfolio);
+  const previewSkills = String(profilePortfolioDraft.skills_input || "")
+    .split(",")
+    .map((skill) => skill.trim())
+    .filter(Boolean)
+    .slice(0, 8);
+  const previewNameTags = getSocialNameTags(socialProfileDraft.name_tags);
   const handleProfileTabKeyDown = (event) => {
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
     const tabs = [...event.currentTarget.querySelectorAll('[role="tab"]')];
@@ -228,7 +279,7 @@ export function StudentProfile({
       }
       const [profileResult, countsResult] = await Promise.all([
         supabase.from("campus_social_profiles")
-          .select("user_id, display_name, username, name_tags, display_name_changed_at, username_changed_at, bio, institution, education_level, avatar_url, discoverable")
+          .select("user_id, display_name, username, name_tags, display_name_changed_at, username_changed_at, bio, avatar_url, discoverable")
           .eq("user_id", authUser.id)
           .maybeSingle(),
         supabase.rpc("get_campus_social_profile_counts"),
@@ -261,6 +312,169 @@ export function StudentProfile({
     loadSocialProfile();
     return () => { active = false; };
   }, [studentData, user?.name]);
+  useEffect(() => {
+    if (!studentData?.id) return undefined;
+    let active = true;
+    const loadPortfolio = async () => {
+      if (!supabase) {
+        setProfilePortfolioError("Profile portfolio settings require a Supabase connection.");
+        setProfilePortfolioLoading(false);
+        return;
+      }
+      setProfilePortfolioLoading(true);
+      setProfilePortfolioError("");
+      try {
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) throw sessionError;
+        const authUser = sessionData?.session?.user;
+        if (!authUser) throw new Error("Sign in to load your profile portfolio.");
+        const { data, error } = await supabase.from("student_profile_portfolios")
+          .select("*")
+          .eq("user_id", authUser.id)
+          .maybeSingle();
+        if (error) throw error;
+        if (!active) return;
+        setProfilePortfolioDraft({
+          ...DEFAULT_STUDENT_PROFILE_PORTFOLIO,
+          ...(data || {}),
+          goal_target: data?.goal_target ?? "",
+          goal_due_date: data?.goal_due_date || "",
+          skills_input: (data?.skills || []).join(", "),
+          projects: Array.isArray(data?.projects) ? data.projects : [],
+        });
+      } catch (error) {
+        if (active) {
+          setProfilePortfolioError(`Profile portfolio could not be loaded: ${error?.message || "Please try again."}`);
+        }
+      } finally {
+        if (active) setProfilePortfolioLoading(false);
+      }
+    };
+    loadPortfolio();
+    return () => { active = false; };
+  }, [studentData?.id]);
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const result = url.searchParams.get("verification");
+    if (!result) return;
+    setVerificationMessage(buildVerificationCallbackMessage(
+      result,
+      url.searchParams.get("verification_reason"),
+      url.searchParams.get("verification_reference"),
+    ));
+    ["verification", "verification_reason", "verification_reference"].forEach((key) =>
+      url.searchParams.delete(key)
+    );
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  }, []);
+  useEffect(() => {
+    if (!studentData?.id) return undefined;
+    let active = true;
+    const loadVerificationStatus = async () => {
+      if (["confirmed", "suspended"].includes(String(studentData.status || "").toLowerCase())) {
+        setVerificationSettings(null);
+        setVerificationApplication(null);
+        setVerificationError("");
+        setVerificationLoading(false);
+        return;
+      }
+      if (!supabase) {
+        setVerificationError("Verification applications are not available right now.");
+        setVerificationLoading(false);
+        return;
+      }
+      setVerificationLoading(true);
+      setVerificationError("");
+      const [settingsResult, applicationResult] = await Promise.all([
+        supabase.from("student_verification_payment_settings")
+          .select("fee_pesewas, currency")
+          .eq("id", 1)
+          .maybeSingle(),
+        supabase.from("student_verification_applications")
+          .select("id, status, payment_reference, amount_pesewas, currency, paid_at, reviewed_at, review_note, refund_status, refund_note, created_at")
+          .eq("student_id", studentData.id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+      if (!active) return;
+      if (settingsResult.error || applicationResult.error) {
+        setVerificationError(getVerificationLoadMessage(settingsResult.error || applicationResult.error));
+      } else {
+        setVerificationSettings(settingsResult.data || null);
+        setVerificationApplication(applicationResult.data || null);
+        if (applicationResult.data?.status === "approved") {
+          onProfileUpdated?.({ status: "confirmed" });
+        }
+      }
+      setVerificationLoading(false);
+    };
+    void loadVerificationStatus();
+    return () => { active = false; };
+  }, [studentData?.id]);
+  useEffect(() => {
+    if (!studentData?.id) return undefined;
+    let active = true;
+    const loadCoursePortfolio = async () => {
+      if (!supabase) {
+        setCoursePortfolioError("Course achievements require a Supabase connection.");
+        setCoursePortfolioLoading(false);
+        return;
+      }
+      setCoursePortfolioLoading(true);
+      setCoursePortfolioError("");
+      try {
+        const { data: enrollmentRows, error: enrollmentError } = await supabase
+          .from("course_enrollments")
+          .select("id, course_id")
+          .eq("student_id", studentData.id);
+        if (enrollmentError) throw enrollmentError;
+        const enrollments = enrollmentRows || [];
+        if (!enrollments.length) {
+          if (active) {
+            setCoursePortfolio(buildStudentCoursePortfolio());
+            setCoursePortfolioLoading(false);
+          }
+          return;
+        }
+        const enrollmentIds = enrollments.map((enrollment) => enrollment.id);
+        const courseIds = [...new Set(enrollments.map((enrollment) => enrollment.course_id))];
+        const [coursesResponse, progressResponse, certificatesResponse, attemptsResponse] = await Promise.all([
+          supabase.from("courses").select("id, title, lessons").in("id", courseIds),
+          supabase.from("course_lesson_progress")
+            .select("enrollment_id, lesson_id")
+            .in("enrollment_id", enrollmentIds)
+            .eq("quiz_passed", true),
+          supabase.from("course_certificates")
+            .select("id, enrollment_id, course_title, issued_at")
+            .in("enrollment_id", enrollmentIds),
+          supabase.from("course_quiz_attempts")
+            .select("id, course_id, lesson_id, percentage, created_at, attempt_type, resit_of_attempt_id, correct_count, total_questions")
+            .in("course_id", courseIds),
+        ]);
+        const failedResponse = [coursesResponse, progressResponse, certificatesResponse, attemptsResponse]
+          .find((response) => response.error);
+        if (failedResponse) throw failedResponse.error;
+        if (active) {
+          setCoursePortfolio(buildStudentCoursePortfolio({
+            enrollments,
+            courses: coursesResponse.data || [],
+            completedProgress: progressResponse.data || [],
+            certificates: certificatesResponse.data || [],
+            quizAttempts: attemptsResponse.data || [],
+          }));
+        }
+      } catch (error) {
+        if (active) {
+          setCoursePortfolioError(`Course achievements could not be loaded: ${error?.message || "Please try again."}`);
+        }
+      } finally {
+        if (active) setCoursePortfolioLoading(false);
+      }
+    };
+    loadCoursePortfolio();
+    return () => { active = false; };
+  }, [studentData?.id]);
   useEffect(() => {
     if (!profilePhotoFile) {
       setProfilePhotoPreview("");
@@ -397,7 +611,7 @@ export function StudentProfile({
       };
       const { data, error } = await supabase.from("campus_social_profiles")
         .upsert(updates, { onConflict: "user_id" })
-        .select("user_id, display_name, username, name_tags, display_name_changed_at, username_changed_at, bio, institution, education_level, avatar_url, discoverable")
+        .select("user_id, display_name, username, name_tags, display_name_changed_at, username_changed_at, bio, avatar_url, discoverable")
         .single();
       if (error) throw error;
       setSocialProfile(data);
@@ -413,6 +627,172 @@ export function StudentProfile({
       setSocialProfileMessage(`Social profile was not saved: ${error?.message || "Please try again."}`);
     } finally {
       setSavingSocialProfile(false);
+    }
+  };
+  const openProfileEditor = () => {
+    setActiveProfileSection("account");
+    setEditingProfile(true);
+  };
+  const addProfileProject = () => {
+    setProfilePortfolioMessage("");
+    try {
+      const projects = normalizeStudentProfileProjects([
+        ...(profilePortfolioDraft.projects || []),
+        profileProjectDraft,
+      ]);
+      setProfilePortfolioDraft((current) => ({ ...current, projects }));
+      setProfileProjectDraft({ title: "", description: "", url: "" });
+    } catch (error) {
+      setProfilePortfolioMessage(error.message);
+    }
+  };
+  const saveProfilePortfolio = async (event) => {
+    event.preventDefault();
+    if (!supabase) {
+      setProfilePortfolioMessage("Profile portfolio settings require a Supabase connection.");
+      return;
+    }
+    setProfilePortfolioSaving(true);
+    setProfilePortfolioMessage("");
+    try {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      const authUser = sessionData?.session?.user;
+      if (!authUser) throw new Error("Sign in to save your profile portfolio.");
+      const goalTitle = String(profilePortfolioDraft.goal_title || "").trim();
+      const goalTargetValue = String(profilePortfolioDraft.goal_target ?? "").trim();
+      let goalTarget = null;
+      if (goalTitle) {
+        goalTarget = Number(goalTargetValue);
+        const validTarget = Number.isFinite(goalTarget)
+          && (profilePortfolioDraft.goal_type === "cgpa"
+            ? goalTarget >= 0.01 && goalTarget <= 4
+            : Number.isInteger(goalTarget) && goalTarget >= 1 && goalTarget <= 1000);
+        if (!validTarget) {
+          throw new Error(profilePortfolioDraft.goal_type === "cgpa"
+            ? "Enter a CGPA target from 0.01 to 4.00."
+            : "Enter a whole-number target from 1 to 1,000.");
+        }
+      } else if (goalTargetValue) {
+        throw new Error("Add a goal title or clear the target value.");
+      }
+      if (profilePortfolioDraft.share_goal && !goalTitle) {
+        throw new Error("Add an academic goal before sharing it.");
+      }
+      const skills = normalizeStudentProfileSkills(profilePortfolioDraft.skills_input);
+      const projects = normalizeStudentProfileProjects(profilePortfolioDraft.projects || []);
+      const sharingSectionsEnabled = profilePortfolioDraft.share_goal
+        || profilePortfolioDraft.share_skills
+        || profilePortfolioDraft.share_projects
+        || profilePortfolioDraft.share_achievements
+        || profilePortfolioDraft.share_institution
+        || profilePortfolioDraft.share_education_level;
+      if (profilePortfolioDraft.share_public && !socialProfileDraft.discoverable) {
+        throw new Error("Make your Social profile discoverable before publishing portfolio sections.");
+      }
+      if (profilePortfolioDraft.share_public && !sharingSectionsEnabled) {
+        throw new Error("Select at least one portfolio section to share.");
+      }
+      const updates = {
+        user_id: authUser.id,
+        goal_title: goalTitle,
+        goal_type: profilePortfolioDraft.goal_type,
+        goal_target: goalTarget,
+        goal_due_date: goalTitle ? profilePortfolioDraft.goal_due_date || null : null,
+        skills,
+        projects,
+        share_goal: profilePortfolioDraft.share_goal,
+        share_skills: profilePortfolioDraft.share_skills,
+        share_projects: profilePortfolioDraft.share_projects,
+        share_achievements: profilePortfolioDraft.share_achievements,
+        share_institution: profilePortfolioDraft.share_institution,
+        share_education_level: profilePortfolioDraft.share_education_level,
+        share_public: profilePortfolioDraft.share_public,
+      };
+      const { data, error } = await supabase.from("student_profile_portfolios")
+        .upsert(updates, { onConflict: "user_id" })
+        .select("*")
+        .single();
+      if (error) throw error;
+      setProfilePortfolioDraft({
+        ...data,
+        goal_target: data.goal_target ?? "",
+        goal_due_date: data.goal_due_date || "",
+        skills_input: (data.skills || []).join(", "),
+        projects: Array.isArray(data.projects) ? data.projects : [],
+      });
+      setProfilePortfolioMessage("Your goals and portfolio were saved.");
+    } catch (error) {
+      setProfilePortfolioMessage(`Portfolio was not saved: ${error?.message || "Please try again."}`);
+    } finally {
+      setProfilePortfolioSaving(false);
+    }
+  };
+  const startVerificationPayment = async () => {
+    if (!supabase) {
+      setVerificationError("Verification payment requires a Supabase connection.");
+      return;
+    }
+    setVerificationBusy(true);
+    setVerificationError("");
+    setVerificationMessage("");
+    try {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) throw new Error("Your session has expired. Sign out, sign back in, and try again.");
+
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      if (!supabaseUrl) throw new Error("Supabase is not configured for payments.");
+      const paymentResponse = await fetch(
+        `${String(supabaseUrl).replace(/\/+$/, "")}/functions/v1/verification-payments`,
+        {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ action: "initialize" }),
+        },
+      );
+      const responseBody = await paymentResponse.json().catch(() => null);
+      if (!paymentResponse.ok) {
+        throw new Error(
+          responseBody?.error ||
+          `The payment service returned HTTP ${paymentResponse.status}.`,
+        );
+      }
+      const data = responseBody;
+      if (data?.error) throw new Error(data.error);
+      if (data?.status === "pending_review") {
+        setVerificationApplication((current) => current
+          ? { ...current, status: "pending_review" }
+          : current);
+        setVerificationMessage("Payment received. Your application is now awaiting review.");
+        return;
+      }
+      if (!data?.authorization_url) {
+        throw new Error("Paystack did not return a checkout link.");
+      }
+      window.location.assign(data.authorization_url);
+    } catch (error) {
+      let message = String(error?.message || "");
+      if (error?.context instanceof Response) {
+        try {
+          const responseBody = await error.context.clone().json();
+          if (responseBody?.error) message = String(responseBody.error);
+        } catch {
+          // Keep the SDK error message when the function has no JSON error body.
+        }
+      }
+      const isNetworkFailure = /failed to send|failed to fetch|networkerror|load failed/i.test(message);
+      setVerificationError(
+        isNetworkFailure
+          ? "The Paystack payment service is unavailable. Refresh the page and try again; if it continues, contact an administrator."
+          : `Payment could not be started: ${message || "Please try again."}`,
+      );
+    } finally {
+      setVerificationBusy(false);
     }
   };
   const changePassword = async () => {
@@ -608,6 +988,7 @@ export function StudentProfile({
               ["social", "Social profile"],
               ["about", "About"],
               ["contact", "Contact"],
+              ["portfolio", "Portfolio"],
               ["account", "Account"],
             ].map(([section, label]) => (
               <button
@@ -632,16 +1013,18 @@ export function StudentProfile({
           <header className="student-profile-section-heading">
             <div>
               <span className="student-profile-eyebrow">
-                {activeProfileSection === "about" ? "STUDENT SNAPSHOT" : activeProfileSection === "contact" ? "STAY CONNECTED" : activeProfileSection === "social" ? "CAMPUS COMMUNITY" : "PREFERENCES & SECURITY"}
+                {activeProfileSection === "about" ? "STUDENT SNAPSHOT" : activeProfileSection === "contact" ? "STAY CONNECTED" : activeProfileSection === "social" ? "CAMPUS COMMUNITY" : activeProfileSection === "portfolio" ? "GOALS & ACHIEVEMENTS" : "PREFERENCES & SECURITY"}
               </span>
-              <h2>{activeProfileSection === "about" ? "About" : activeProfileSection === "contact" ? "Contact information" : activeProfileSection === "social" ? "Social profile" : "Account settings"}</h2>
+              <h2>{activeProfileSection === "about" ? "About" : activeProfileSection === "contact" ? "Contact information" : activeProfileSection === "social" ? "Social profile" : activeProfileSection === "portfolio" ? "Goals & portfolio" : "Account settings"}</h2>
               <p>{activeProfileSection === "about"
                 ? "Your academic identity and student record at a glance."
                 : activeProfileSection === "contact"
                   ? "Your contact details and the places you call home."
                   : activeProfileSection === "social"
                     ? "Manage the name, username, and interests other students see."
-                    : "Manage your profile, sign-in security, and account access."}</p>
+                    : activeProfileSection === "portfolio"
+                      ? "Set a learning goal, celebrate course progress, and choose what appears on your Social profile."
+                      : "Manage your profile, sign-in security, and account access."}</p>
             </div>
           </header>
 
@@ -713,7 +1096,23 @@ export function StudentProfile({
               >
                 <span style={{ width: `${profileCompletion}%` }} />
               </div>
-              <p>Complete your contact and academic details to keep your student record up to date.</p>
+              <p>Use the checklist to update editable details or ask an administrator about official records.</p>
+              <ul className="student-profile-completion-checklist">
+                {incompleteProfileItems.length ? incompleteProfileItems.map((item) => (
+                  <li key={item.key}>
+                    <span>{item.label}</span>
+                    {item.editable ? (
+                      <button type="button" onClick={openProfileEditor}>Update</button>
+                    ) : (
+                      <a href={`mailto:${supportEmail}?subject=${encodeURIComponent("Update student record")}`}>
+                        Ask admin
+                      </a>
+                    )}
+                  </li>
+                )) : (
+                  <li className="is-complete"><span>Your profile details are up to date.</span></li>
+                )}
+              </ul>
             </article>
           </section>
           </section>
@@ -833,6 +1232,267 @@ export function StudentProfile({
             </section>
           )}
 
+          {activeProfileSection === "portfolio" && (
+            <section className="student-profile-tab-panel student-profile-portfolio-panel" id="student-profile-panel-portfolio" role="tabpanel" aria-labelledby="student-profile-tab-portfolio">
+              {profilePortfolioLoading && (
+                <p className="student-profile-portfolio-message" role="status">Loading your goals and sharing settings...</p>
+              )}
+              <div className="student-profile-portfolio-grid">
+                <article className="student-profile-panel student-profile-achievements">
+                  <div className="student-profile-panel-heading">
+                    <div>
+                      <span className="student-profile-eyebrow">LEARNING PROGRESS</span>
+                      <h3>Achievements</h3>
+                    </div>
+                  </div>
+                  <div className="student-profile-portfolio-stats">
+                    <div><strong>{coursePortfolio.completedCourses}</strong><span>Certificates earned</span></div>
+                    <div><strong>{coursePortfolio.completedChapters}/{coursePortfolio.totalChapters}</strong><span>Chapters passed</span></div>
+                    <div><strong>{coursePortfolio.cgpa ?? "—"}</strong><span>Course CGPA estimate</span></div>
+                  </div>
+                  <p className="student-profile-portfolio-note">
+                    Course CGPA is an estimate based on saved course quiz results, not an official school result.
+                  </p>
+                  {coursePortfolioLoading ? (
+                    <p className="student-profile-portfolio-message" role="status">Loading your course progress...</p>
+                  ) : coursePortfolioError ? (
+                    <p className="student-profile-portfolio-message is-error" role="alert">{coursePortfolioError}</p>
+                  ) : coursePortfolio.courses.length ? (
+                    <div className="student-profile-course-list">
+                      {coursePortfolio.courses.map((course) => {
+                        const percent = course.totalLessons
+                          ? Math.round((course.completedCount / course.totalLessons) * 100)
+                          : 0;
+                        return (
+                          <article className="student-profile-course-progress" key={course.courseId}>
+                            <div>
+                              <strong>{course.title}</strong>
+                              <span>
+                                {course.completedCount} of {course.totalLessons} chapters passed
+                                {course.certificate ? " · Certificate earned" : ""}
+                              </span>
+                            </div>
+                            <div className="student-profile-progress" role="progressbar" aria-label={`${course.title} progress`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}>
+                              <span style={{ width: `${percent}%` }} />
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="student-profile-portfolio-message">Enroll in a course to start building your learning portfolio.</p>
+                  )}
+                  {coursePortfolio.certificates.length > 0 && (
+                    <div className="student-profile-certificates">
+                      <h4>Certificates</h4>
+                      {coursePortfolio.certificates.map((certificate) => (
+                        <div key={certificate.id}>
+                          <strong>{certificate.course_title}</strong>
+                          <span>{certificate.issued_at ? new Date(certificate.issued_at).toLocaleDateString() : "Completed"}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </article>
+
+                <div className="student-profile-portfolio-settings">
+                  <form className="student-profile-panel student-profile-portfolio-form" onSubmit={saveProfilePortfolio}>
+                    <div className="student-profile-panel-heading">
+                      <div>
+                        <span className="student-profile-eyebrow">YOUR NEXT STEP</span>
+                        <h3>Academic goal</h3>
+                      </div>
+                    </div>
+                    <label>
+                      Goal
+                      <input
+                        maxLength={120}
+                        value={profilePortfolioDraft.goal_title || ""}
+                        onChange={(event) => setProfilePortfolioDraft((current) => ({ ...current, goal_title: event.target.value }))}
+                        placeholder="e.g. Complete my biology course"
+                      />
+                    </label>
+                    <div className="student-profile-form-grid">
+                      <label>
+                        Track progress by
+                        <select
+                          value={profilePortfolioDraft.goal_type}
+                          onChange={(event) => setProfilePortfolioDraft((current) => ({ ...current, goal_type: event.target.value }))}
+                        >
+                          <option value="chapters">Chapters passed</option>
+                          <option value="courses">Courses completed</option>
+                          <option value="cgpa">Course CGPA estimate</option>
+                        </select>
+                      </label>
+                      <label>
+                        Target
+                        <input
+                          type="number"
+                          min={profilePortfolioDraft.goal_type === "cgpa" ? "0.01" : "1"}
+                          max={profilePortfolioDraft.goal_type === "cgpa" ? "4" : "1000"}
+                          step={profilePortfolioDraft.goal_type === "cgpa" ? "0.01" : "1"}
+                          value={profilePortfolioDraft.goal_target ?? ""}
+                          onChange={(event) => setProfilePortfolioDraft((current) => ({ ...current, goal_target: event.target.value }))}
+                          placeholder={profilePortfolioDraft.goal_type === "cgpa" ? "e.g. 3.50" : "e.g. 10"}
+                        />
+                      </label>
+                    </div>
+                    <label>
+                      Target date (optional)
+                      <input
+                        type="date"
+                        value={profilePortfolioDraft.goal_due_date || ""}
+                        onChange={(event) => setProfilePortfolioDraft((current) => ({ ...current, goal_due_date: event.target.value }))}
+                      />
+                    </label>
+                    {profilePortfolioDraft.goal_title && (
+                      <div className="student-profile-goal-progress">
+                        {profileGoalProgress ? (
+                          <>
+                            <div>
+                              <strong>{profileGoalProgress.current} / {profileGoalProgress.target}</strong>
+                              <span>{profilePortfolioDraft.goal_type === "cgpa" ? "current estimate / target" : "completed / target"}</span>
+                            </div>
+                            <div className="student-profile-progress" role="progressbar" aria-label="Academic goal progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={profileGoalProgress.percentage}>
+                              <span style={{ width: `${profileGoalProgress.percentage}%` }} />
+                            </div>
+                          </>
+                        ) : (
+                          <p>Pass course chapter quizzes to calculate progress toward this goal.</p>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="student-profile-portfolio-divider" />
+                    <div className="student-profile-panel-heading">
+                      <div>
+                        <span className="student-profile-eyebrow">SHOW WHAT YOU CAN DO</span>
+                        <h3>Skills &amp; projects</h3>
+                      </div>
+                    </div>
+                    <label>
+                      Skills (up to 8, separated by commas)
+                      <input
+                        maxLength={320}
+                        value={profilePortfolioDraft.skills_input || ""}
+                        onChange={(event) => setProfilePortfolioDraft((current) => ({ ...current, skills_input: event.target.value }))}
+                        placeholder="e.g. Research, public speaking, Python"
+                      />
+                    </label>
+                    {profilePortfolioDraft.projects.length > 0 && (
+                      <div className="student-profile-project-list" aria-label="Your projects">
+                        {profilePortfolioDraft.projects.map((project, index) => (
+                          <article className="student-profile-project" key={`${project.title}-${index}`}>
+                            <div><strong>{project.title}</strong>{project.description && <p>{project.description}</p>}{project.url && <span>{project.url}</span>}</div>
+                            <button type="button" className="student-profile-secondary-button" onClick={() => setProfilePortfolioDraft((current) => ({ ...current, projects: current.projects.filter((_, itemIndex) => itemIndex !== index) }))}>Remove</button>
+                          </article>
+                        ))}
+                      </div>
+                    )}
+                    <div className="student-profile-project-form">
+                      <label>
+                        Project title
+                        <input maxLength={80} value={profileProjectDraft.title} onChange={(event) => setProfileProjectDraft((current) => ({ ...current, title: event.target.value }))} placeholder="e.g. Community science project" />
+                      </label>
+                      <label>
+                        Short description
+                        <textarea maxLength={280} value={profileProjectDraft.description} onChange={(event) => setProfileProjectDraft((current) => ({ ...current, description: event.target.value }))} placeholder="What did you build or learn?" />
+                      </label>
+                      <label>
+                        Project link (optional)
+                        <input type="url" maxLength={2048} value={profileProjectDraft.url} onChange={(event) => setProfileProjectDraft((current) => ({ ...current, url: event.target.value }))} placeholder="https://..." />
+                      </label>
+                      <button type="button" className="student-profile-secondary-button" onClick={addProfileProject} disabled={profilePortfolioDraft.projects.length >= 5}>Add project</button>
+                    </div>
+
+                    <div className="student-profile-portfolio-divider" />
+                    <div className="student-profile-panel-heading">
+                      <div>
+                        <span className="student-profile-eyebrow">PRIVACY &amp; SHARING</span>
+                        <h3>Choose what others can see</h3>
+                      </div>
+                    </div>
+                    <label className="student-profile-share-toggle">
+                      <input type="checkbox" checked={profilePortfolioDraft.share_public} onChange={(event) => setProfilePortfolioDraft((current) => ({ ...current, share_public: event.target.checked }))} />
+                      Publish selected portfolio sections on my discoverable Social profile
+                    </label>
+                    <div className="student-profile-sharing-options">
+                      {[
+                        ["share_institution", `School or institution${student.institution ? ` (${student.institution})` : ""}`],
+                        ["share_education_level", `Education level${student.class ? ` (${student.class})` : ""}`],
+                        ["share_goal", "Academic goal and target"],
+                        ["share_skills", "Skills"],
+                        ["share_projects", "Projects and links"],
+                        ["share_achievements", "Course progress and certificates"],
+                      ].map(([key, label]) => (
+                        <label key={key} className="student-profile-share-toggle">
+                          <input
+                            type="checkbox"
+                            checked={profilePortfolioDraft[key] === true}
+                            onChange={(event) => setProfilePortfolioDraft((current) => ({ ...current, [key]: event.target.checked }))}
+                          />
+                          {label}
+                        </label>
+                      ))}
+                    </div>
+                    {!socialProfileDraft.discoverable && (
+                      <p className="student-profile-privacy-help">
+                        Your Social profile is not discoverable yet. Enable it in{" "}
+                        <button type="button" className="student-profile-inline-link" onClick={() => setActiveProfileSection("social")}>Social profile settings</button>{" "}
+                        before publishing a portfolio.
+                      </p>
+                    )}
+                    <div className="student-profile-privacy-preview">
+                      <div className="student-profile-preview-identity">
+                        <div className="student-profile-preview-avatar">
+                          {student.photo_url
+                            ? <img src={student.photo_url} alt="" />
+                            : initials || "ST"}
+                        </div>
+                        <div>
+                        <span className="student-profile-eyebrow">PUBLIC PROFILE PREVIEW</span>
+                        <h4>{socialProfileDraft.display_name || student.display_name || student.full_name || user?.name || "Student"}</h4>
+                        {socialProfileDraft.username && <span>@{socialProfileDraft.username.replace(/^@/, "")}</span>}
+                        </div>
+                      </div>
+                      {previewNameTags.length > 0 && (
+                        <div className="student-profile-preview-tags">
+                          {previewNameTags.map((tag) => <span key={tag}>{tag}</span>)}
+                        </div>
+                      )}
+                      {socialProfileDraft.bio && <p>{socialProfileDraft.bio}</p>}
+                      {profilePortfolioDraft.share_institution && student.institution && <p>{student.institution}</p>}
+                      {profilePortfolioDraft.share_education_level && student.class && <p>{student.class}</p>}
+                      {profilePortfolioDraft.share_goal && profilePortfolioDraft.goal_title && <p><strong>Goal:</strong> {profilePortfolioDraft.goal_title}</p>}
+                      {profilePortfolioDraft.share_skills && previewSkills.length > 0 && (
+                        <div className="student-profile-preview-tags">{previewSkills.map((skill, index) => <span key={`${skill}-${index}`}>{skill}</span>)}</div>
+                      )}
+                      {profilePortfolioDraft.share_projects && profilePortfolioDraft.projects.map((project, index) => (
+                        <p key={`${project.title}-${index}`}><strong>Project:</strong> {project.title}</p>
+                      ))}
+                      {profilePortfolioDraft.share_achievements && coursePortfolio.certificates.length > 0 && (
+                        <p>{coursePortfolio.certificates.length} course certificate{coursePortfolio.certificates.length === 1 ? "" : "s"} earned</p>
+                      )}
+                      <p className="student-profile-privacy-note">
+                        Student ID, date of birth, contact details, and home address stay private.
+                        {profilePortfolioDraft.share_public && socialProfileDraft.discoverable
+                          ? " Selected sections will be visible to signed-in students who can view your profile."
+                          : " This portfolio preview is private until you enable sharing and discoverability."}
+                      </p>
+                    </div>
+                    <div className="student-profile-editor-actions">
+                      <button className="student-profile-edit-button" type="submit" disabled={profilePortfolioSaving || profilePortfolioLoading}>
+                        {profilePortfolioSaving ? "Saving portfolio..." : "Save goals & portfolio"}
+                      </button>
+                    </div>
+                    {profilePortfolioError && <p className="student-profile-portfolio-message is-error" role="alert">{profilePortfolioError}</p>}
+                    {profilePortfolioMessage && <p className="student-profile-portfolio-message" role="status">{profilePortfolioMessage}</p>}
+                  </form>
+                </div>
+              </div>
+            </section>
+          )}
+
           {activeProfileSection === "account" && (
             <section className="student-profile-tab-panel student-profile-account-panel" id="student-profile-panel-account" role="tabpanel" aria-labelledby="student-profile-tab-account">
               {!editingProfile && (
@@ -850,6 +1510,109 @@ export function StudentProfile({
                     </span>
                     <p>Your student record and access are managed securely through Campus Ghana.</p>
                   </div>
+                </article>
+              )}
+              {!editingProfile && (
+                <article className="student-profile-panel student-profile-verification">
+                  <div className="student-profile-panel-heading">
+                    <div>
+                      <span className="student-profile-eyebrow">STUDENT VERIFICATION</span>
+                      <h3>
+                        {studentStatus === "confirmed"
+                          ? "Verification status"
+                          : isSuspended
+                            ? "Verification unavailable"
+                            : verificationApplication?.status === "pending_review"
+                              ? "Application under review"
+                              : "Apply for verification"}
+                      </h3>
+                    </div>
+                    {studentStatus === "confirmed" && !isSuspended && (
+                      <span className="student-profile-status is-confirmed">
+                        <StudentVerifiedBadge />
+                        Verified
+                      </span>
+                    )}
+                  </div>
+                  {!verificationLoading && !isSuspended && studentStatus !== "confirmed" && (
+                    <div className="verification-payment-actions">
+                      {verificationApplication?.status !== "pending_review" && (
+                        Number(verificationSettings?.fee_pesewas) > 0 ? (
+                          <button
+                            className="student-profile-edit-button"
+                            type="button"
+                            onClick={startVerificationPayment}
+                            disabled={verificationBusy}
+                          >
+                            {verificationBusy
+                              ? "Connecting to Paystack..."
+                              : `Apply for verification · ${new Intl.NumberFormat("en-GH", {
+                                style: "currency",
+                                currency: verificationSettings?.currency || "GHS",
+                              }).format(Number(verificationSettings.fee_pesewas) / 100)}`}
+                          </button>
+                        ) : !verificationError && (
+                          <p className="verification-feedback">
+                            Applications are not open yet. An administrator will set the fee in the dashboard.
+                          </p>
+                        )
+                      )}
+                    </div>
+                  )}
+                  {verificationLoading && (
+                    <p className="verification-feedback" role="status">Loading verification details...</p>
+                  )}
+                  {verificationError && studentStatus !== "confirmed" && !isSuspended && (
+                    <p className="verification-feedback is-error" role="alert">{verificationError}</p>
+                  )}
+                  {verificationMessage && (
+                    <p className="verification-feedback" role="status">{verificationMessage}</p>
+                  )}
+                  {verificationApplication && (
+                    <div className="verification-application-summary">
+                      <div>
+                        <span>Application status</span>
+                        <strong>
+                          {verificationApplication.status === "pending_review"
+                            ? "Paid — awaiting admin review"
+                            : verificationApplication.status === "approved"
+                              ? "Approved"
+                              : "Not approved"}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>Application fee</span>
+                        <strong>
+                          {new Intl.NumberFormat("en-GH", {
+                            style: "currency",
+                            currency: verificationApplication.currency || "GHS",
+                          }).format(Number(verificationApplication.amount_pesewas || 0) / 100)}
+                        </strong>
+                      </div>
+                      {verificationApplication.review_note && (
+                        <p className="verification-review-note">
+                          Admin note: {verificationApplication.review_note}
+                        </p>
+                      )}
+                      {verificationApplication.status === "declined" && (
+                        <p className="verification-review-note">
+                          Refund status: {verificationApplication.refund_status === "refunded"
+                            ? "Refund recorded"
+                            : verificationApplication.refund_status === "not_refunded"
+                              ? "No refund recorded"
+                              : "Under review"}
+                          {verificationApplication.refund_note
+                            ? ` ${verificationApplication.refund_note}`
+                            : ""}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  {isSuspended && (
+                    <p className="verification-feedback is-error">
+                      Suspended accounts cannot submit verification applications.
+                    </p>
+                  )}
                 </article>
               )}
 

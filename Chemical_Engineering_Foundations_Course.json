@@ -1,0 +1,218 @@
+[
+  {
+    "title": "Chemical Engineering Foundations: Processes, Balances, and Design",
+    "description": "An original introductory course in chemical engineering. Learners build skills in process thinking, measurement, material and energy balances, reaction calculations, fluid transport, and separation choices through worked examples and practice.",
+    "subject": "Chemical Engineering",
+    "is_published": true,
+    "lessons": [
+      {
+        "title": "1. Thinking in Chemical Processes",
+        "content": "LEARNING OUTCOMES\nBy the end of this lesson, you should be able to describe a process using inputs, operations, and outputs; define a system boundary; and identify basic hazards that need review before work begins.\n\nCORE IDEAS\nChemical engineering applies science and quantitative reasoning to transform materials safely and consistently. A process may contain one operation, such as mixing, or several connected steps, such as reacting, cooling, and separating. A process boundary is an imaginary line drawn around the equipment or steps being studied. Streams crossing the boundary are inputs or outputs. Equipment inside the boundary is part of the system.\n\nA block diagram is a useful first model: draw a box for each major operation and arrows for material or energy streams. Keep the diagram at a level of detail that answers the question being studied. A model is not a full plant drawing and should not be used as a substitute for operating instructions.\n\nSafety is part of process design, not an afterthought. Before an experiment or operation, identify hazards, estimate who or what could be exposed, and choose controls. Prefer removing or reducing a hazard over relying only on personal protective equipment. Follow the site procedure, use suitable supervision, and never improvise with unknown chemicals or pressurized equipment.\n\nWORKED EXAMPLE\nFor a small water-treatment line, draw a boundary around a filter. The feed water enters, filtered water leaves, and retained solids leave during cleaning. The filter itself is inside the boundary. If the study concerns water quality, record the feed and product flow and the quality measure of interest.\n\nPRACTICE\n1. Draw a three-box diagram for preparing a diluted cleaning solution: measure, mix, and transfer.\n2. For a dryer, name one material input, one material output, and one energy input.\n3. Why should a process boundary be stated before writing a balance?\n4. Name two safety questions to ask before a supervised laboratory operation.\n\nANSWER GUIDE\n1. Draw three boxes in order with arrows for the solution and suitable labels; include the intended product leaving transfer.\n2. Wet material; dried material and removed water vapour; heat or electrical energy.\n3. The boundary determines which streams and changes belong in the balance.\n4. Examples: What chemical, thermal, pressure, or moving-equipment hazards exist? What controls and emergency steps are required?",
+        "quiz": [
+          {
+            "id": "ce1-q1",
+            "prompt": "What does a process boundary identify?",
+            "options": [
+              { "id": "ce1-q1-a", "text": "The system included in an analysis and the streams crossing its edge" },
+              { "id": "ce1-q1-b", "text": "Only the outside walls of a factory" },
+              { "id": "ce1-q1-c", "text": "The brand of each piece of equipment" }
+            ],
+            "correctOptionId": "ce1-q1-a"
+          },
+          {
+            "id": "ce1-q2",
+            "prompt": "When should process safety be considered?",
+            "options": [
+              { "id": "ce1-q2-a", "text": "Only after an incident" },
+              { "id": "ce1-q2-b", "text": "During planning and throughout operation" },
+              { "id": "ce1-q2-c", "text": "Only when personal protective equipment is unavailable" }
+            ],
+            "correctOptionId": "ce1-q2-b"
+          }
+        ]
+      },
+      {
+        "title": "2. Measurements, Units, and Dimensional Checks",
+        "content": "LEARNING OUTCOMES\nYou should be able to convert common process units, use dimensional analysis, and check whether a calculated quantity has the expected dimensions.\n\nCORE IDEAS\nA measured number is meaningful only with a unit and a clear definition. Common process quantities include mass, length, time, temperature, volume, pressure, and amount of substance. Keep units attached through each step of a calculation. Convert to a consistent unit system before combining measurements. For example, a rate in cubic metres per hour cannot be added directly to one in litres per minute.\n\nDimensional analysis uses unit relationships to guide conversions. Since 1 m3 = 1000 L and 1 h = 60 min, conversion factors can be arranged so unwanted units cancel. A result for mass flow should have units of mass per time; a result for density should have units of mass per volume. If units do not cancel to the expected form, revisit the setup before trusting the number.\n\nUse significant figures consistent with the precision of the measurements. Keep extra digits during intermediate steps and round the reported result appropriately. Temperature differences can be expressed in kelvins or degrees Celsius because their interval size is the same; absolute temperature calculations require an absolute scale.\n\nWORKED EXAMPLE\nConvert 2.4 m3/h to L/min:\n2.4 m3/h x 1000 L/m3 x 1 h/60 min = 40 L/min.\nThe cubic metres and hours cancel, leaving litres per minute.\n\nPRACTICE\n1. Convert 750 g to kg.\n2. Convert 3.6 m3/h to L/min.\n3. A liquid has mass 12 kg and volume 0.015 m3. Calculate density in kg/m3.\n4. A student calculates a volume flow but reports kg/s. What should be checked?\n\nANSWER GUIDE\n1. 0.750 kg.\n2. 3.6 x 1000 / 60 = 60 L/min.\n3. 12 / 0.015 = 800 kg/m3.\n4. Check the equation and unit conversions: a volume flow should have units such as m3/s or L/min, not mass per time.",
+        "quiz": [
+          {
+            "id": "ce2-q1",
+            "prompt": "What is 1.8 m3/h in L/min?",
+            "options": [
+              { "id": "ce2-q1-a", "text": "30 L/min" },
+              { "id": "ce2-q1-b", "text": "180 L/min" },
+              { "id": "ce2-q1-c", "text": "0.03 L/min" }
+            ],
+            "correctOptionId": "ce2-q1-a"
+          },
+          {
+            "id": "ce2-q2",
+            "prompt": "What is a useful first check on a calculated engineering quantity?",
+            "options": [
+              { "id": "ce2-q2-a", "text": "Whether its units match the quantity being calculated" },
+              { "id": "ce2-q2-b", "text": "Whether the number has many decimal places" },
+              { "id": "ce2-q2-c", "text": "Whether every input was converted to percent" }
+            ],
+            "correctOptionId": "ce2-q2-a"
+          }
+        ]
+      },
+      {
+        "title": "3. Process Flow and Stream Composition",
+        "content": "LEARNING OUTCOMES\nYou should be able to distinguish batch and continuous operation, label a simple process-flow diagram, and calculate component flow from a mixture composition.\n\nCORE IDEAS\nIn batch operation, a quantity is processed for a period and then removed; in continuous operation, material generally enters and leaves while the process runs. A process-flow diagram represents major operations and streams. Give each stream a name or number and record the quantities needed for the analysis, such as total flow, temperature, pressure, and composition.\n\nMass fraction is the mass of a component divided by total mixture mass. It is dimensionless and ranges from zero to one. A mass percentage is mass fraction multiplied by 100. Component mass flows add to total mass flow. For a two-component mixture, if one component has mass fraction w, the other has mass fraction 1-w. Do not mix mass fraction with volume fraction or mole fraction; they describe different bases.\n\nWORKED EXAMPLE\nA solution flows at 120 kg/h and contains 25% solute by mass. Solute flow is 0.25 x 120 = 30 kg/h. The remaining liquid flow is 120 - 30 = 90 kg/h. The component flows sum to the total: 30 + 90 = 120 kg/h.\n\nPRACTICE\n1. A 200 kg batch contains 8% salt by mass. Find the salt mass.\n2. A continuous feed is 50 kg/h with mass fraction 0.12 of component A. Find the A and non-A flow rates.\n3. State one difference between batch and continuous processing.\n4. In a diagram of a mixer, identify the material streams that should cross the mixer boundary.\n\nANSWER GUIDE\n1. 0.08 x 200 = 16 kg.\n2. A: 0.12 x 50 = 6 kg/h; other material: 44 kg/h.\n3. Batch processes a finite charge over a defined period; continuous operation has ongoing feed and product flow.\n4. All feed streams entering and the mixed outlet stream leaving; include any other stream crossing the chosen boundary.",
+        "quiz": [
+          {
+            "id": "ce3-q1",
+            "prompt": "A 80 kg/h stream contains 10% component A by mass. What is the A flow rate?",
+            "options": [
+              { "id": "ce3-q1-a", "text": "8 kg/h" },
+              { "id": "ce3-q1-b", "text": "10 kg/h" },
+              { "id": "ce3-q1-c", "text": "72 kg/h" }
+            ],
+            "correctOptionId": "ce3-q1-a"
+          },
+          {
+            "id": "ce3-q2",
+            "prompt": "Which statement about a mass fraction is correct?",
+            "options": [
+              { "id": "ce3-q2-a", "text": "It is component mass divided by total mixture mass" },
+              { "id": "ce3-q2-b", "text": "It is always greater than one" },
+              { "id": "ce3-q2-c", "text": "It is interchangeable with volume fraction in every mixture" }
+            ],
+            "correctOptionId": "ce3-q2-a"
+          }
+        ]
+      },
+      {
+        "title": "4. Material Balances for Nonreacting Systems",
+        "content": "LEARNING OUTCOMES\nYou should be able to write a general material balance, simplify it for steady operation, and solve a simple mixing or separation calculation.\n\nCORE IDEAS\nFor a chosen system and component, the general balance is: accumulation = input - output + generation - consumption. In a nonreacting physical process, generation and consumption of each chemical component are zero. At steady state, accumulation is zero, so input equals output for each component. The total balance and component balances should agree; use both as independent checks where possible.\n\nStart by drawing the boundary and labeling unknown streams. Choose a basis, such as 100 kg of feed or one hour of operation. Convert percentages into fractions before applying them. If a mixture is split without chemical change, each outlet has the same composition as the feed unless the separator selectively changes component amounts. For a separator, component balances can determine how much of each component exits in each stream.\n\nWORKED EXAMPLE\nTwo water streams are mixed steadily: 40 kg/h at 10% solute and 60 kg/h at 2% solute. Solute input is 40 x 0.10 + 60 x 0.02 = 5.2 kg/h. Total output is 100 kg/h, so the outlet solute mass fraction is 5.2/100 = 0.052, or 5.2%.\n\nPRACTICE\n1. A steady mixer receives 20 kg/h at 5% A and 30 kg/h at 15% A. Find the total outlet flow and A mass fraction.\n2. A 100 kg feed containing 30 kg of solid is filtered. If 27 kg of solid is retained, how much solid remains in the liquid outlet?\n3. What balance term is zero at steady state?\n4. A vessel's liquid level rises during filling. Is the accumulation term zero? Explain.\n\nANSWER GUIDE\n1. Total = 50 kg/h. A input = 1 + 4.5 = 5.5 kg/h. Mass fraction = 5.5/50 = 0.11, or 11%.\n2. 30 - 27 = 3 kg, assuming no other solid input or reaction.\n3. Accumulation.\n4. No. The amount held in the vessel is increasing, so accumulation is positive.",
+        "quiz": [
+          {
+            "id": "ce4-q1",
+            "prompt": "For a nonreacting system at steady state, which relation applies to a component?",
+            "options": [
+              { "id": "ce4-q1-a", "text": "Input equals output" },
+              { "id": "ce4-q1-b", "text": "Input must be zero" },
+              { "id": "ce4-q1-c", "text": "Output is always twice the input" }
+            ],
+            "correctOptionId": "ce4-q1-a"
+          },
+          {
+            "id": "ce4-q2",
+            "prompt": "A mixer combines 10 kg/h of A with 30 kg/h of material that contains no A. What is the outlet mass fraction of A?",
+            "options": [
+              { "id": "ce4-q2-a", "text": "0.25" },
+              { "id": "ce4-q2-b", "text": "0.75" },
+              { "id": "ce4-q2-c", "text": "4.0" }
+            ],
+            "correctOptionId": "ce4-q2-a"
+          }
+        ]
+      },
+      {
+        "title": "5. Reaction Stoichiometry and Performance",
+        "content": "LEARNING OUTCOMES\nYou should be able to balance a simple reaction, use stoichiometric coefficients to relate reactant and product amounts, and distinguish limiting reactant, conversion, and yield.\n\nCORE IDEAS\nA balanced chemical equation conserves each element. Its coefficients give mole ratios, not mass ratios. Convert mass to amount using n = m/M, where n is amount in moles, m is mass, and M is molar mass. Compare available reactant amounts with the equation's required ratio to find the limiting reactant: the reactant that would be used up first if the reaction proceeded as specified.\n\nConversion is the fraction of a chosen reactant that reacts. Yield compares the amount of desired product actually obtained with a stated theoretical amount. Selectivity compares desired product formation with competing product formation or reactant consumption, according to the definition being used. Always state the basis and definition before calculating these measures.\n\nWORKED EXAMPLE\nFor 2 H2 + O2 -> 2 H2O, 5 mol H2 would require 2.5 mol O2. If 3 mol O2 is available, hydrogen is limiting. At complete reaction, 5 mol H2O can form. If only 4 mol H2O is collected, yield relative to this theoretical amount is 4/5 x 100% = 80%.\n\nPRACTICE\n1. Balance: N2 + H2 -> NH3.\n2. For 2 CO + O2 -> 2 CO2, how many moles of O2 are needed for 6 mol CO?\n3. A process feeds 10 mol of reactant B and reacts 7 mol. Calculate conversion of B.\n4. A reaction's theoretical product is 12 kg and actual product is 9 kg. Calculate yield on this basis.\n\nANSWER GUIDE\n1. N2 + 3 H2 -> 2 NH3.\n2. 3 mol O2.\n3. 7/10 x 100% = 70%.\n4. 9/12 x 100% = 75%.",
+        "quiz": [
+          {
+            "id": "ce5-q1",
+            "prompt": "In a balanced chemical equation, what do the coefficients specify?",
+            "options": [
+              { "id": "ce5-q1-a", "text": "Relative amounts in moles" },
+              { "id": "ce5-q1-b", "text": "Relative volumes for every possible condition" },
+              { "id": "ce5-q1-c", "text": "The mass in kilograms of each substance" }
+            ],
+            "correctOptionId": "ce5-q1-a"
+          },
+          {
+            "id": "ce5-q2",
+            "prompt": "A reactant feed is 8 mol and 6 mol reacts. What is its conversion?",
+            "options": [
+              { "id": "ce5-q2-a", "text": "75%" },
+              { "id": "ce5-q2-b", "text": "25%" },
+              { "id": "ce5-q2-c", "text": "133%" }
+            ],
+            "correctOptionId": "ce5-q2-a"
+          }
+        ]
+      },
+      {
+        "title": "6. Energy Balances and Heating",
+        "content": "LEARNING OUTCOMES\nYou should be able to identify energy entering and leaving a simple process and estimate sensible heat for a temperature change when heat capacity is provided.\n\nCORE IDEAS\nAn energy balance compares energy transfer and energy accumulation for a defined system. Energy may cross a process boundary as heat, work, or energy carried by flowing material. A practical balance should clearly state assumptions, such as steady state, negligible heat loss, or no shaft work. These assumptions are simplifications, not universal facts.\n\nFor a mass m undergoing a temperature change without a phase change, sensible heat can be estimated with Q = m cp deltaT, where cp is the specific heat capacity and deltaT is final minus initial temperature. If m is in kg, cp in kJ/(kg K), and deltaT in K, Q is in kJ. This estimate does not include latent heat during boiling, melting, or another phase change. If heat capacity changes substantially with temperature, use suitable temperature-dependent data and a more complete calculation.\n\nWORKED EXAMPLE\nHeat 4 kg of liquid with cp = 4.18 kJ/(kg K) from 20 C to 70 C, assuming no phase change and no heat loss. deltaT = 50 K. Q = 4 x 4.18 x 50 = 836 kJ.\n\nPRACTICE\n1. Estimate heat for 2 kg of a liquid with cp = 3.0 kJ/(kg K), heated by 25 K.\n2. A 500 kg/h stream is cooled by 10 K; cp is 2.0 kJ/(kg K). Estimate the heat removal rate in kJ/h.\n3. Does Q = m cp deltaT include the energy for boiling? Explain.\n4. Give one reason an actual heater may require more energy than an ideal sensible-heat estimate.\n\nANSWER GUIDE\n1. 2 x 3.0 x 25 = 150 kJ.\n2. 500 x 2.0 x 10 = 10,000 kJ/h removed.\n3. No. A phase-change energy term is needed, using appropriate latent-heat data.\n4. Heat loss to surroundings, equipment heating, incomplete insulation, or other process demands.",
+        "quiz": [
+          {
+            "id": "ce6-q1",
+            "prompt": "For Q = m cp deltaT, which units produce Q in kJ?",
+            "options": [
+              { "id": "ce6-q1-a", "text": "kg, kJ/(kg K), and K" },
+              { "id": "ce6-q1-b", "text": "m, kg/s, and kPa" },
+              { "id": "ce6-q1-c", "text": "L, mol, and degrees per second" }
+            ],
+            "correctOptionId": "ce6-q1-a"
+          },
+          {
+            "id": "ce6-q2",
+            "prompt": "What is not included in the sensible-heat equation by itself?",
+            "options": [
+              { "id": "ce6-q2-a", "text": "Energy for a phase change" },
+              { "id": "ce6-q2-b", "text": "Mass of the material" },
+              { "id": "ce6-q2-c", "text": "Temperature change" }
+            ],
+            "correctOptionId": "ce6-q2-a"
+          }
+        ]
+      },
+      {
+        "title": "7. Fluid Flow and Pumping Basics",
+        "content": "LEARNING OUTCOMES\nYou should be able to calculate average velocity from volumetric flow and area, describe pressure loss in a pipe, and estimate idealized pump power when flow, elevation head, density, and efficiency are known.\n\nCORE IDEAS\nVolumetric flow rate Q is volume per time. For a full pipe with average velocity v and cross-sectional area A, Q = vA. For a circular pipe, A = pi D^2/4. The actual flow profile is not uniform, so v is an average. Real pipe systems lose pressure because of friction and fittings; the size of the loss depends on the fluid, geometry, roughness, and flow conditions. Use measured or appropriately calculated losses for design rather than assuming a friction-free line.\n\nA pump adds energy to move fluid. For an incompressible liquid lifted through height H, ideal hydraulic power is rho g Q H, where rho is density, g is gravitational acceleration, and Q is in m3/s. If pump efficiency eta is supplied, required input power is approximately rho g Q H / eta. This simplified estimate excludes other system effects unless they are represented in the required head. Equipment selection and operation must follow engineering review and site safety requirements.\n\nWORKED EXAMPLE\nWater flows at 0.002 m3/s and is lifted 15 m. Take rho = 1000 kg/m3, g = 9.81 m/s2, and pump efficiency = 0.60. Input power is approximately (1000 x 9.81 x 0.002 x 15)/0.60 = 490.5 W.\n\nPRACTICE\n1. A pipe carries 0.01 m3/s through an area of 0.005 m2. Find average velocity.\n2. Estimate input power for water at 0.001 m3/s, head 10 m, and efficiency 0.50 using g = 9.81 m/s2.\n3. Name two factors that can increase pipe pressure loss.\n4. Why is pump power based on efficiency greater than ideal hydraulic power?\n\nANSWER GUIDE\n1. v = Q/A = 0.01/0.005 = 2 m/s.\n2. (1000 x 9.81 x 0.001 x 10)/0.50 = 196.2 W.\n3. Greater flow, longer or narrower pipe, roughness, bends, valves, and fluid properties can affect losses.\n4. Some input energy is lost through inefficiencies rather than transferred usefully to the fluid.",
+        "quiz": [
+          {
+            "id": "ce7-q1",
+            "prompt": "A flow rate of 0.006 m3/s passes through area 0.003 m2. What is average velocity?",
+            "options": [
+              { "id": "ce7-q1-a", "text": "2 m/s" },
+              { "id": "ce7-q1-b", "text": "0.0005 m/s" },
+              { "id": "ce7-q1-c", "text": "18 m/s" }
+            ],
+            "correctOptionId": "ce7-q1-a"
+          },
+          {
+            "id": "ce7-q2",
+            "prompt": "How does pump efficiency affect the estimated input power for a fixed hydraulic duty?",
+            "options": [
+              { "id": "ce7-q2-a", "text": "Lower efficiency requires greater input power" },
+              { "id": "ce7-q2-b", "text": "Lower efficiency always reduces input power" },
+              { "id": "ce7-q2-c", "text": "Efficiency has no effect" }
+            ],
+            "correctOptionId": "ce7-q2-a"
+          }
+        ]
+      },
+      {
+        "title": "8. Separation Choices and Responsible Design",
+        "content": "LEARNING OUTCOMES\nYou should be able to match common separation methods to a mixture property, compare alternatives using stated goals, and describe ways to reduce process waste and resource use.\n\nCORE IDEAS\nA separation exploits a difference between components. Filtration retains suspended solids while fluid passes through a porous medium. Settling uses density differences and gravity. Distillation uses differences in volatility and requires heat transfer. Absorption transfers a component between gas and liquid phases. Membrane processes selectively allow some species to pass. No method is universally best: feed composition, product specification, throughput, energy, water use, cost, maintenance, and safety all matter.\n\nStart with the product goal and the material that must be recovered or removed. Sketch possible process steps, identify the main energy and material demands, and compare options on the same basis. A recovery fraction can be defined as desired component in the product divided by that component in the feed, multiplied by 100%. State clearly which outlet is considered the product. A high recovery is not automatically a good design if the product is off specification or the process creates an unacceptable hazard or waste burden.\n\nResponsible design considers preventing waste at source, recovering useful materials where practical, reducing unnecessary heating and pumping, and treating residual streams appropriately. Any real installation must comply with applicable standards, environmental requirements, and competent engineering review.\n\nWORKED EXAMPLE\nA feed contains 100 kg of a useful dissolved component. A separation sends 85 kg of it to the desired product stream. Recovery to that product is 85/100 x 100% = 85%. This figure alone does not state product purity; the amount of unwanted material in the product must be assessed separately.\n\nPRACTICE\n1. Which method is a reasonable first choice for separating sand from water: filtration or distillation? Explain.\n2. Name one situation where distillation could be considered and one important resource demand to evaluate.\n3. A process recovers 72 kg of a component from 90 kg entering. Find recovery percentage.\n4. List three criteria, besides recovery, for comparing two process options.\n\nANSWER GUIDE\n1. Filtration can retain suspended sand while water passes through; suitability depends on particle size and the required water quality.\n2. It may separate a liquid mixture with different volatilities; evaluate heating and cooling energy as well as safety and cost.\n3. 72/90 x 100% = 80%.\n4. Examples include product purity, energy use, water use, safety, waste, reliability, maintenance, and cost.",
+        "quiz": [
+          {
+            "id": "ce8-q1",
+            "prompt": "Which separation method commonly retains suspended solids while liquid passes through a porous medium?",
+            "options": [
+              { "id": "ce8-q1-a", "text": "Filtration" },
+              { "id": "ce8-q1-b", "text": "Distillation" },
+              { "id": "ce8-q1-c", "text": "Combustion" }
+            ],
+            "correctOptionId": "ce8-q1-a"
+          },
+          {
+            "id": "ce8-q2",
+            "prompt": "What does recovery to a product stream measure?",
+            "options": [
+              { "id": "ce8-q2-a", "text": "The share of a feed component that reaches the specified product stream" },
+              { "id": "ce8-q2-b", "text": "The purity of every product in all cases" },
+              { "id": "ce8-q2-c", "text": "The energy used per unit time" }
+            ],
+            "correctOptionId": "ce8-q2-a"
+          }
+        ]
+      }
+    ]
+  }
+]

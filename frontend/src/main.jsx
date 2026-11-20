@@ -2,6 +2,7 @@ import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 
 import { NotificationProvider } from "./components/NotificationSystem.jsx";
+import { NetworkStatusBanner } from "./components/NetworkStatusBanner.jsx";
 
 const GhanaCampus = lazy(() => import("./App.jsx"));
 
@@ -18,6 +19,7 @@ if (import.meta.env.PROD && "serviceWorker" in navigator) {
 createRoot(document.getElementById("root")).render(
   <StrictMode>
     <NotificationProvider>
+      <NetworkStatusBanner />
       <Suspense fallback={<div role="status">Loading Campus Ghana...</div>}>
         <GhanaCampus />
       </Suspense>

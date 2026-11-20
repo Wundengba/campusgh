@@ -1,0 +1,19 @@
+.network-status-banner {
+  position: sticky;
+  top: 0;
+  z-index: 1200;
+  padding: 10px 16px;
+  color: #47200f;
+  background: #fff0cf;
+  border-bottom: 1px solid #e8c67a;
+  font-size: .82rem;
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: center;
+}
+
+body.dark-mode .network-status-banner {
+  color: #ffe7b0;
+  background: #4a3514;
+  border-color: #775921;
+}
